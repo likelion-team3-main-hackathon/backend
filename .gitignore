@@ -4,7 +4,47 @@ build/
 !gradle/wrapper/gradle-wrapper.jar
 !**/src/main/**/build/
 !**/src/test/**/build/
+
+### Environment variables / local overrides ###
 .env
+.env.*
+!.env.example
+*.env
+application-local.yml
+application-local.yaml
+application-local.properties
+application-prod.yml
+application-prod.yaml
+application-prod.properties
+application-secret*.yml
+application-secret*.yaml
+application-secret*.properties
+
+### Secrets / credentials / certificates ###
+secrets/
+secret/
+credentials/
+*.pem
+*.key
+*.p8
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.crt
+*.cer
+*service-account*.json
+*credentials*.json
+*secret*.json
+
+### Runtime data that may contain user or health information ###
+uploads/
+storage/
+data/
+logs/
+*.log
+*.dump
+*.sql.gz
 
 ### STS ###
 .apt_generated

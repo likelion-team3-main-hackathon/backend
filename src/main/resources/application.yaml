@@ -1,24 +1,64 @@
 spring:
   application:
-    name: health
-
+    name: tri-lion-health
+  profiles:
+    default: local
   datasource:
-    url: jdbc:h2:mem:testdb # H2 DB연결 주소 (In-Memory Mode)
-    driver-class-name: org.h2.Driver
-    username: trilion       # H2 DB 접속 ID (사용자 지정)
-    password: triloin0821    # H2 DB 접속 PW (사용자 지정)
-
-  # H2 Console 설정
-  h2:
-    console:
-      enabled: true     # H2 Console 사용 여부
-      path: /h2-console     # H2 Console 접속 주소
-
-  # JPA 설정
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/aac_wellness?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC}
+    username: ${SPRING_DATASOURCE_USERNAME:aac_user}
+    password: ${SPRING_DATASOURCE_PASSWORD:aac_password}
   jpa:
+    open-in-view: false
     hibernate:
-      ddl-auto: update      # DB 초기화 전략 (none, create, create-drop, update, validate)
-    show-sql: true          # 쿼리 로그 출력
+      ddl-auto: validate
     properties:
-      hibernate:
-        format_sql: true    # 쿼리 로그 포맷 (정렬)
+      hibernate.jdbc.time_zone: UTC
+  flyway:
+    enabled: true
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 11MB
+  data:
+    redis:
+      url: ${REDIS_URL:redis://localhost:6379}
+
+server:
+  forward-headers-strategy: framework
+  shutdown: graceful
+
+management:
+  endpoints.web.exposure.include: health,info
+  endpoint.health.probes.enabled: true
+
+springdoc:
+  swagger-ui.path: /swagger-ui.html
+
+app:
+  frontend-origin: ${FRONTEND_ORIGIN:http://localhost:3000}
+  jwt:
+    secret: ${JWT_SECRET:local-development-jwt-secret-must-be-at-least-32-bytes}
+    issuer: tri-lion-health
+    access-seconds: 1800
+    refresh-seconds: 1209600
+  google:
+    client-id: ${GOOGLE_CLIENT_ID:local-client}
+    issuer: ${GOOGLE_ISSUER:https://accounts.google.com}
+  storage:
+    endpoint: ${OBJECT_STORAGE_ENDPOINT:http://localhost:9000}
+    private-bucket: ${OBJECT_STORAGE_BUCKET_PRIVATE:health-private}
+    public-bucket: ${OBJECT_STORAGE_BUCKET_PUBLIC:health-public}
+
+---
+spring:
+  config.activate.on-profile: test
+  datasource:
+    url: jdbc:h2:mem:health;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa.hibernate.ddl-auto: create-drop
+  flyway.enabled: false
+
+app:
+  adapters.fake: true

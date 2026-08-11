@@ -1,0 +1,2 @@
+package tri_lion.health.domain.user;import jakarta.persistence.*;import lombok.*;
+@Entity@Table(name="user_injuries")@Getter@NoArgsConstructor(access=AccessLevel.PROTECTED)public class UserInjury{@Id@GeneratedValue(strategy=GenerationType.IDENTITY)@Column(name="injury_id")private Long id;@Column(name="user_id")private Long userId;@Column(name="body_part")private String bodyPart;private String description;}

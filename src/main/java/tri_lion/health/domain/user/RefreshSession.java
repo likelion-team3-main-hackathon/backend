@@ -1,0 +1,4 @@
+package tri_lion.health.domain.user;
+import jakarta.persistence.*; import java.time.Instant; import lombok.*;
+@Entity @Table(name="refresh_token_sessions") @Getter @NoArgsConstructor(access=AccessLevel.PROTECTED)
+public class RefreshSession { @Id @Column(name="session_id") private String id; @Column(name="user_id") private Long userId; @Column(name="token_hash") private String tokenHash; @Column(name="expires_at") private Instant expiresAt; @Column(name="revoked_at") private Instant revokedAt; @Column(name="device_info") private String deviceInfo; @Column(name="last_used_at") private Instant lastUsedAt; public RefreshSession(String id,Long userId,String hash,Instant expires,String device){this.id=id;this.userId=userId;this.tokenHash=hash;this.expiresAt=expires;this.deviceInfo=device;this.lastUsedAt=Instant.now();} public boolean usable(){return revokedAt==null&&expiresAt.isAfter(Instant.now());} public void revoke(){revokedAt=Instant.now();lastUsedAt=revokedAt;} }
