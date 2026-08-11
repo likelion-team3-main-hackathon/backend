@@ -23,6 +23,14 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 	implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'
 
+	runtimeOnly 'com.h2database:h2'
+	developmentOnly 'org.springframework.boot:spring-boot-h2console'
+
+	compileOnly 'org.projectlombok:lombok:1.18.44'
+	annotationProcessor 'org.projectlombok:lombok:1.18.44'
+	testCompileOnly 'org.projectlombok:lombok:1.18.44'
+	testAnnotationProcessor 'org.projectlombok:lombok:1.18.44'
+
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
