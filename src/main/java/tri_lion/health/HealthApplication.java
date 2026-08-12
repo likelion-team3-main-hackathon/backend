@@ -8,12 +8,13 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication
 @EnableJpaAuditing
-@EnableJpaRepositories(basePackages = "tri_lion.health.repository", considerNestedRepositories = true)
+@EnableJpaRepositories(
+        basePackages = "tri_lion.health.repository",
+        considerNestedRepositories = true)
 @EnableScheduling
 public class HealthApplication {
 
-	public static void main(String[] args) {
-		SpringApplication.run(HealthApplication.class, args);
-	}
-
+    public static void main(String[] args) {
+        SpringApplication.run(HealthApplication.class, args);
+    }
 }

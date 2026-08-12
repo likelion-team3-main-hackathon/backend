@@ -1,3 +1,61 @@
 package tri_lion.health.service.health;
-import com.fasterxml.jackson.databind.ObjectMapper;import java.time.Instant;import java.util.Map;import org.springframework.data.domain.PageRequest;import org.springframework.scheduling.annotation.Scheduled;import org.springframework.stereotype.Component;import org.springframework.transaction.annotation.Transactional;import tri_lion.health.domain.health.*;import tri_lion.health.external.ai.AiClients;import tri_lion.health.repository.health.HealthRepositories;
-@Component public class AiJobWorker {private final HealthRepositories.Jobs jobs;private final HealthRepositories.Analyses analyses;private final AiClients.LlmClient llm;private final ObjectMapper json;private final tri_lion.health.service.routine.RoutineService routines;private final tri_lion.health.service.record.RecordService records;public AiJobWorker(HealthRepositories.Jobs j,HealthRepositories.Analyses a,AiClients.LlmClient l,ObjectMapper o,tri_lion.health.service.routine.RoutineService r,tri_lion.health.service.record.RecordService records){jobs=j;analyses=a;llm=l;json=o;routines=r;this.records=records;}@Scheduled(fixedDelayString="${app.worker.delay-ms:500}")@Transactional public void work(){for(AiJob job:jobs.claimable(Instant.now(),PageRequest.of(0,10))){try{job.processing();if(job.getType()==AiJob.Type.HEALTH_ANALYSIS){Analysis a=analyses.findById(job.getResultId()).orElseThrow();a.processing();String result=llm.healthAnalysis(job.getRequestJson());json.readTree(result);a.complete("건강한 생활 습관 형성이 우선입니다.",result);}else if(job.getType()==AiJob.Type.ROUTINE_GENERATION||job.getType()==AiJob.Type.ROUTINE_ADJUSTMENT){routines.generate(job);}else if(job.getType()==AiJob.Type.RECORD_COACHING){records.coach(job);}job.complete();}catch(Exception e){job.retry("외부 AI 처리 실패");}}}}
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Instant;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+import tri_lion.health.domain.health.*;
+import tri_lion.health.external.ai.AiClients;
+import tri_lion.health.repository.health.HealthRepositories;
+
+@Component
+public class AiJobWorker {
+    private final HealthRepositories.Jobs jobs;
+    private final HealthRepositories.Analyses analyses;
+    private final AiClients.LlmClient llm;
+    private final ObjectMapper json;
+    private final tri_lion.health.service.routine.RoutineService routines;
+    private final tri_lion.health.service.record.RecordService records;
+
+    public AiJobWorker(
+            HealthRepositories.Jobs j,
+            HealthRepositories.Analyses a,
+            AiClients.LlmClient l,
+            ObjectMapper o,
+            tri_lion.health.service.routine.RoutineService r,
+            tri_lion.health.service.record.RecordService records) {
+        jobs = j;
+        analyses = a;
+        llm = l;
+        json = o;
+        routines = r;
+        this.records = records;
+    }
+
+    @Scheduled(fixedDelayString = "${app.worker.delay-ms:500}")
+    @Transactional
+    public void work() {
+        for (AiJob job : jobs.claimable(Instant.now(), PageRequest.of(0, 10))) {
+            try {
+                job.processing();
+                if (job.getType() == AiJob.Type.HEALTH_ANALYSIS) {
+                    Analysis a = analyses.findById(job.getResultId()).orElseThrow();
+                    a.processing();
+                    String result = llm.healthAnalysis(job.getRequestJson());
+                    json.readTree(result);
+                    a.complete("건강한 생활 습관 형성이 우선입니다.", result);
+                } else if (job.getType() == AiJob.Type.ROUTINE_GENERATION
+                        || job.getType() == AiJob.Type.ROUTINE_ADJUSTMENT) {
+                    routines.generate(job);
+                } else if (job.getType() == AiJob.Type.RECORD_COACHING) {
+                    records.coach(job);
+                }
+                job.complete();
+            } catch (Exception e) {
+                job.retry("외부 AI 처리 실패");
+            }
+        }
+    }
+}

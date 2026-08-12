@@ -1,3 +1,45 @@
 package tri_lion.health.controller.user;
-import jakarta.validation.Valid; import java.time.Instant; import org.springframework.web.bind.annotation.*; import tri_lion.health.common.response.ApiResponse; import tri_lion.health.dto.request.user.UserRequests; import tri_lion.health.security.AuthenticatedUser; import tri_lion.health.service.user.UserService;
-@RestController @RequestMapping("/api/v1/users/me") public class UserController {private final UserService service;private final AuthenticatedUser auth;public UserController(UserService s,AuthenticatedUser a){service=s;auth=a;} @PutMapping("/agreements") ApiResponse<Object> agreements(@Valid @RequestBody UserRequests.AgreementsRequest r){service.agreements(r);return ApiResponse.success(200,"약관 동의 저장 성공",java.util.Map.of("requiredAgreementsCompleted",true,"nextStep","ONBOARDING"));} @PutMapping("/onboarding") ApiResponse<Object> onboarding(@Valid @RequestBody UserRequests.OnboardingRequest r){Instant at=service.onboarding(r);return ApiResponse.success(200,"온보딩 정보 저장 성공",java.util.Map.of("userId",auth.id(),"onboardingCompleted",true,"updatedAt",at));} @GetMapping("/profile") ApiResponse<UserService.Profile> profile(){return ApiResponse.success(200,"내 프로필 조회 성공",service.profile());}}
+
+import jakarta.validation.Valid;
+import java.time.Instant;
+import org.springframework.web.bind.annotation.*;
+import tri_lion.health.common.response.ApiResponse;
+import tri_lion.health.dto.request.user.UserRequests;
+import tri_lion.health.security.AuthenticatedUser;
+import tri_lion.health.service.user.UserService;
+
+@RestController
+@RequestMapping("/api/v1/users/me")
+public class UserController {
+    private final UserService service;
+    private final AuthenticatedUser auth;
+
+    public UserController(UserService s, AuthenticatedUser a) {
+        service = s;
+        auth = a;
+    }
+
+    @PutMapping("/agreements")
+    ApiResponse<Object> agreements(@Valid @RequestBody UserRequests.AgreementsRequest r) {
+        service.agreements(r);
+        return ApiResponse.success(
+                200,
+                "약관 동의 저장 성공",
+                java.util.Map.of("requiredAgreementsCompleted", true, "nextStep", "ONBOARDING"));
+    }
+
+    @PutMapping("/onboarding")
+    ApiResponse<Object> onboarding(@Valid @RequestBody UserRequests.OnboardingRequest r) {
+        Instant at = service.onboarding(r);
+        return ApiResponse.success(
+                200,
+                "온보딩 정보 저장 성공",
+                java.util.Map.of(
+                        "userId", auth.id(), "onboardingCompleted", true, "updatedAt", at));
+    }
+
+    @GetMapping("/profile")
+    ApiResponse<UserService.Profile> profile() {
+        return ApiResponse.success(200, "내 프로필 조회 성공", service.profile());
+    }
+}

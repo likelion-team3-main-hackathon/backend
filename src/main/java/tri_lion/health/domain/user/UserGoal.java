@@ -1,2 +1,25 @@
-package tri_lion.health.domain.user;import jakarta.persistence.*;import java.math.BigDecimal;import lombok.*;
-@Entity@Table(name="user_goals")@Getter@NoArgsConstructor(access=AccessLevel.PROTECTED)public class UserGoal{@Id@GeneratedValue(strategy=GenerationType.IDENTITY)@Column(name="goal_id")private Long id;@Column(name="user_id")private Long userId;@Column(name="goal_type")private String goalType;@Column(name="target_value")private BigDecimal targetValue;}
+package tri_lion.health.domain.user;
+
+import jakarta.persistence.*;
+import java.math.BigDecimal;
+import lombok.*;
+
+@Entity
+@Table(name = "user_goals")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class UserGoal {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "goal_id")
+    private Long id;
+
+    @Column(name = "user_id")
+    private Long userId;
+
+    @Column(name = "goal_type")
+    private String goalType;
+
+    @Column(name = "target_value")
+    private BigDecimal targetValue;
+}

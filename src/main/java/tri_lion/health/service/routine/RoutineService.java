@@ -1,14 +1,349 @@
 package tri_lion.health.service.routine;
-import com.fasterxml.jackson.databind.*;import java.math.BigDecimal;import java.time.*;import java.util.*;import org.springframework.data.domain.*;import org.springframework.http.HttpStatus;import org.springframework.stereotype.Service;import org.springframework.transaction.annotation.Transactional;import tri_lion.health.domain.health.*;import tri_lion.health.domain.routine.*;import tri_lion.health.dto.request.routine.RoutineRequests;import tri_lion.health.exception.ApiException;import tri_lion.health.repository.health.HealthRepositories;import tri_lion.health.repository.routine.RoutineRepositories;import tri_lion.health.security.AuthenticatedUser;
-@Service public class RoutineService {private final RoutineRepositories.Routines routines;private final RoutineRepositories.Days days;private final RoutineRepositories.Sections sections;private final RoutineRepositories.Items items;private final HealthRepositories.Analyses analyses;private final HealthRepositories.Jobs jobs;private final AuthenticatedUser auth;private final ObjectMapper json;public RoutineService(RoutineRepositories.Routines r,RoutineRepositories.Days d,RoutineRepositories.Sections s,RoutineRepositories.Items i,HealthRepositories.Analyses a,HealthRepositories.Jobs j,AuthenticatedUser u,ObjectMapper o){routines=r;days=d;sections=s;items=i;analyses=a;jobs=j;auth=u;json=o;}
- @Transactional public AiJob request(RoutineRequests.GenerationRequest req,String key){Long uid=auth.sensitive().getId();Analysis a=analyses.findByIdAndUserId(req.analysisId(),uid).filter(x->x.getStatus()==Analysis.Status.COMPLETED).orElseThrow(()->new ApiException(HttpStatus.UNPROCESSABLE_ENTITY,"루틴 생성에 필요한 온보딩 또는 건강 분석 정보가 부족합니다."));if(key!=null){var old=jobs.findByUserIdAndTypeAndIdempotencyKey(uid,AiJob.Type.ROUTINE_GENERATION,key);if(old.isPresent())return old.get();}try{return jobs.save(new AiJob(uid,AiJob.Type.ROUTINE_GENERATION,json.writeValueAsString(req),null,key));}catch(Exception e){throw ApiException.conflict("같은 생성 요청이 이미 처리되었습니다.");}}
- @Transactional public Long generate(AiJob job){try{JsonNode n=json.readTree(job.getRequestJson());LocalDate start=LocalDate.parse(n.get("startDate").asText());int weeks=n.get("durationWeeks").asInt();Long previous=n.hasNonNull("previousRoutineId")?n.get("previousRoutineId").asLong():null;Routine r=routines.save(new Routine(job.getUserId(),previous==null?"맞춤 4주 웰니스 루틴":"재조정 맞춤 루틴",start,weeks,previous));RoutineDay day=days.save(new RoutineDay(r.getId(),1,start,18));RoutineSection main=sections.save(new RoutineSection(day.getId(),RoutineSection.Type.MAIN_EXERCISE,"본 운동",1));RoutineSection cool=sections.save(new RoutineSection(day.getId(),RoutineSection.Type.COOL_DOWN,"마무리 스트레칭",2));String[][] ex={{"점핑잭","20","SECONDS"},{"복부 크런치","15","REPETITIONS"},{"크로스오버 크런치","16","REPETITIONS"},{"러시안 트위스트","20","REPETITIONS"},{"마운틴 클라이머","26","REPETITIONS"},{"다리 들어올리기","12","REPETITIONS"},{"플랭크","30","SECONDS"},{"비스듬한 사선 트위스트","16","REPETITIONS"},{"크로스 암 크런치","15","REPETITIONS"},{"죽은 곤충 자세","20","REPETITIONS"},{"마운틴 클라이머","26","REPETITIONS"},{"레그 스프레드","10","REPETITIONS"},{"플랭크","30","SECONDS"},{"고양이 소 포즈","30","SECONDS"},{"코브라 스트레칭","30","SECONDS"},{"어린이 포즈","30","SECONDS"}};for(int x=0;x<ex.length;x++){Long section=x<11?main.getId():cool.getId();items.save(new ExerciseItem(r.getId(),section,ex[x][0],x<11?x+1:x-10,new BigDecimal(ex[x][1]),ExerciseItem.Unit.valueOf(ex[x][2]),1,x==10?30:(x<11?10:5),"https://cdn.example.com/exercises/"+(x+1)+".mp4",null,null,false,Routine.Editor.AI));}if(previous!=null){int order=12;for(ExerciseItem protectedItem:items.findByRoutineIdAndDeletedAtIsNullOrderBySortOrder(previous).stream().filter(ExerciseItem::isExcludeFromAiAdjustment).toList()){items.save(new ExerciseItem(r.getId(),main.getId(),protectedItem.getName(),order++,protectedItem.getTargetValue(),protectedItem.getTargetUnit(),protectedItem.getSets(),protectedItem.getRestSeconds(),protectedItem.getVideoUrl(),protectedItem.getThumbnailUrl(),protectedItem.getMemo(),true,protectedItem.getEditedBy()));}}job.result(r.getId());return r.getId();}catch(Exception e){throw new IllegalStateException(e);}}
- public AiJob generation(Long id){return jobs.findByIdAndUserId(id,auth.active().getId()).filter(j->j.getType()==AiJob.Type.ROUTINE_GENERATION||j.getType()==AiJob.Type.ROUTINE_ADJUSTMENT).orElseThrow(()->ApiException.notFound("루틴 생성 작업을 찾을 수 없습니다."));}
- public Page<Routine> list(int page,int size){return routines.findByUserIdAndDeletedAtIsNullOrderByUpdatedAtDesc(auth.active().getId(),PageRequest.of(page,Math.min(size,100)));}public Routine owned(Long id){return routines.findByIdAndUserIdAndDeletedAtIsNull(id,auth.active().getId()).orElseThrow(()->ApiException.notFound("해당 ID의 루틴을 찾을 수 없습니다."));}public Routine today(){Long uid=auth.active().getId();LocalDate now=LocalDate.now();return routines.findFirstByUserIdAndStartDateLessThanEqualAndEndDateGreaterThanEqualAndDeletedAtIsNullOrderByCreatedAtDesc(uid,now,now).orElseThrow(()->ApiException.notFound("오늘 생성된 루틴이 없습니다."));}
- public Detail detail(Long id){Routine r=owned(id);List<DayView>dv=days.findByRoutineIdOrderByScheduledDate(id).stream().map(d->new DayView(d,sections.findByRoutineDayIdOrderBySortOrder(d.getId()).stream().map(s->new SectionView(s,items.findBySectionIdAndDeletedAtIsNullOrderBySortOrder(s.getId()))).toList())).toList();return new Detail(r,dv);}@Transactional public Routine patch(Long id,RoutineRequests.PatchRoutine req){Routine r=owned(id);r.patch(req.title(),req.description(),req.endDate(),req.aiAdjustmentAllowed(),req.status());return r;}
- @Transactional public ExerciseItem add(Long routineId,Long sectionId,RoutineRequests.ExerciseRequest q){Routine r=owned(routineId);List<Long>ds=days.findByRoutineIdOrderByScheduledDate(r.getId()).stream().map(RoutineDay::getId).toList();sections.findByIdAndRoutineDayIdIn(sectionId,ds).orElseThrow(()->ApiException.notFound("루틴 구간을 찾을 수 없습니다."));validateUrl(q.videoUrl());List<ExerciseItem>existing=items.findBySectionIdAndDeletedAtIsNullOrderBySortOrder(sectionId);int order=Math.min(q.order(),existing.size()+1);existing.stream().filter(x->x.getSortOrder()>=order).forEach(x->x.order(x.getSortOrder()+1));return items.save(new ExerciseItem(routineId,sectionId,q.name(),order,q.targetValue(),ExerciseItem.Unit.valueOf(q.targetUnit()),q.sets(),q.restSeconds(),q.videoUrl(),q.thumbnailUrl(),q.memo(),q.excludeFromAiAdjustment(),Routine.Editor.USER));}
- @Transactional public ExerciseItem patchExercise(Long routineId,Long exerciseId,RoutineRequests.PatchExercise q){owned(routineId);ExerciseItem i=items.findByIdAndRoutineIdAndDeletedAtIsNull(exerciseId,routineId).orElseThrow(()->ApiException.notFound("운동 항목을 찾을 수 없습니다."));validateUrl(q.videoUrl());i.patch(q.name(),q.targetValue(),q.targetUnit(),q.sets(),q.restSeconds(),q.videoUrl(),q.thumbnailUrl(),q.memo(),q.excludeFromAiAdjustment());return i;}@Transactional public void deleteExercise(Long r,Long i){owned(r);items.findByIdAndRoutineIdAndDeletedAtIsNull(i,r).orElseThrow(()->ApiException.notFound("운동 항목을 찾을 수 없습니다.")).delete();}
- @Transactional public List<Long>order(Long r,Long s,List<Long>ids){owned(r);List<ExerciseItem>current=items.findBySectionIdAndDeletedAtIsNullOrderBySortOrder(s);Set<Long>expected=current.stream().map(ExerciseItem::getId).collect(java.util.stream.Collectors.toSet());if(ids.size()!=expected.size()||new HashSet<>(ids).size()!=ids.size()||!expected.equals(new HashSet<>(ids)))throw new ApiException(HttpStatus.BAD_REQUEST,"해당 구간의 모든 운동 ID를 중복 없이 전달해야 합니다.");Map<Long,ExerciseItem>map=new HashMap<>();current.forEach(x->map.put(x.getId(),x));for(int x=0;x<ids.size();x++)map.get(ids.get(x)).order(x+1);return ids;}
- @Transactional public AiJob adjust(Long routineId,RoutineRequests.AdjustmentRequest req,String key){Routine old=owned(routineId);if(!old.isAiAdjustmentAllowed())throw ApiException.conflict("AI 재조정이 허용되지 않은 루틴입니다.");try{String payload=json.writeValueAsString(Map.of("startDate",LocalDate.now(),"durationWeeks",4,"previousRoutineId",routineId,"reason",req.reason(),"userMessage",Optional.ofNullable(req.userMessage()).orElse("")));return jobs.save(new AiJob(old.getUserId(),AiJob.Type.ROUTINE_ADJUSTMENT,payload,null,key));}catch(Exception e){throw ApiException.conflict("같은 재조정 요청이 이미 처리되었습니다.");}}
- private void validateUrl(String u){if(u!=null&&!u.isBlank()&&!u.startsWith("https://"))throw new ApiException(HttpStatus.BAD_REQUEST,"영상 URL은 HTTPS만 허용합니다.");}public record Detail(Routine routine,List<DayView>days){}public record DayView(RoutineDay day,List<SectionView>sections){}public record SectionView(RoutineSection section,List<ExerciseItem>exercises){}
+
+import com.fasterxml.jackson.databind.*;
+import java.math.BigDecimal;
+import java.time.*;
+import java.util.*;
+import org.springframework.data.domain.*;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import tri_lion.health.domain.health.*;
+import tri_lion.health.domain.routine.*;
+import tri_lion.health.dto.request.routine.RoutineRequests;
+import tri_lion.health.exception.ApiException;
+import tri_lion.health.repository.health.HealthRepositories;
+import tri_lion.health.repository.routine.RoutineRepositories;
+import tri_lion.health.security.AuthenticatedUser;
+
+@Service
+public class RoutineService {
+    private final RoutineRepositories.Routines routines;
+    private final RoutineRepositories.Days days;
+    private final RoutineRepositories.Sections sections;
+    private final RoutineRepositories.Items items;
+    private final HealthRepositories.Analyses analyses;
+    private final HealthRepositories.Jobs jobs;
+    private final AuthenticatedUser auth;
+    private final ObjectMapper json;
+
+    public RoutineService(
+            RoutineRepositories.Routines r,
+            RoutineRepositories.Days d,
+            RoutineRepositories.Sections s,
+            RoutineRepositories.Items i,
+            HealthRepositories.Analyses a,
+            HealthRepositories.Jobs j,
+            AuthenticatedUser u,
+            ObjectMapper o) {
+        routines = r;
+        days = d;
+        sections = s;
+        items = i;
+        analyses = a;
+        jobs = j;
+        auth = u;
+        json = o;
+    }
+
+    @Transactional
+    public AiJob request(RoutineRequests.GenerationRequest req, String key) {
+        Long uid = auth.sensitive().getId();
+        Analysis a =
+                analyses.findByIdAndUserId(req.analysisId(), uid)
+                        .filter(x -> x.getStatus() == Analysis.Status.COMPLETED)
+                        .orElseThrow(
+                                () ->
+                                        new ApiException(
+                                                HttpStatus.UNPROCESSABLE_ENTITY,
+                                                "루틴 생성에 필요한 온보딩 또는 건강 분석 정보가 부족합니다."));
+        if (key != null) {
+            var old =
+                    jobs.findByUserIdAndTypeAndIdempotencyKey(
+                            uid, AiJob.Type.ROUTINE_GENERATION, key);
+            if (old.isPresent()) return old.get();
+        }
+        try {
+            return jobs.save(
+                    new AiJob(
+                            uid,
+                            AiJob.Type.ROUTINE_GENERATION,
+                            json.writeValueAsString(req),
+                            null,
+                            key));
+        } catch (Exception e) {
+            throw ApiException.conflict("같은 생성 요청이 이미 처리되었습니다.");
+        }
+    }
+
+    @Transactional
+    public Long generate(AiJob job) {
+        try {
+            JsonNode n = json.readTree(job.getRequestJson());
+            LocalDate start = LocalDate.parse(n.get("startDate").asText());
+            int weeks = n.get("durationWeeks").asInt();
+            Long previous =
+                    n.hasNonNull("previousRoutineId") ? n.get("previousRoutineId").asLong() : null;
+            Routine r =
+                    routines.save(
+                            new Routine(
+                                    job.getUserId(),
+                                    previous == null ? "맞춤 4주 웰니스 루틴" : "재조정 맞춤 루틴",
+                                    start,
+                                    weeks,
+                                    previous));
+            RoutineDay day = days.save(new RoutineDay(r.getId(), 1, start, 18));
+            RoutineSection main =
+                    sections.save(
+                            new RoutineSection(
+                                    day.getId(), RoutineSection.Type.MAIN_EXERCISE, "본 운동", 1));
+            RoutineSection cool =
+                    sections.save(
+                            new RoutineSection(
+                                    day.getId(), RoutineSection.Type.COOL_DOWN, "마무리 스트레칭", 2));
+            String[][] ex = {
+                {"점핑잭", "20", "SECONDS"},
+                {"복부 크런치", "15", "REPETITIONS"},
+                {"크로스오버 크런치", "16", "REPETITIONS"},
+                {"러시안 트위스트", "20", "REPETITIONS"},
+                {"마운틴 클라이머", "26", "REPETITIONS"},
+                {"다리 들어올리기", "12", "REPETITIONS"},
+                {"플랭크", "30", "SECONDS"},
+                {"비스듬한 사선 트위스트", "16", "REPETITIONS"},
+                {"크로스 암 크런치", "15", "REPETITIONS"},
+                {"죽은 곤충 자세", "20", "REPETITIONS"},
+                {"마운틴 클라이머", "26", "REPETITIONS"},
+                {"레그 스프레드", "10", "REPETITIONS"},
+                {"플랭크", "30", "SECONDS"},
+                {"고양이 소 포즈", "30", "SECONDS"},
+                {"코브라 스트레칭", "30", "SECONDS"},
+                {"어린이 포즈", "30", "SECONDS"}
+            };
+            for (int x = 0; x < ex.length; x++) {
+                Long section = x < 11 ? main.getId() : cool.getId();
+                items.save(
+                        new ExerciseItem(
+                                r.getId(),
+                                section,
+                                ex[x][0],
+                                x < 11 ? x + 1 : x - 10,
+                                new BigDecimal(ex[x][1]),
+                                ExerciseItem.Unit.valueOf(ex[x][2]),
+                                1,
+                                x == 10 ? 30 : (x < 11 ? 10 : 5),
+                                "https://cdn.example.com/exercises/" + (x + 1) + ".mp4",
+                                null,
+                                null,
+                                false,
+                                Routine.Editor.AI));
+            }
+            if (previous != null) {
+                int order = 12;
+                for (ExerciseItem protectedItem :
+                        items.findByRoutineIdAndDeletedAtIsNullOrderBySortOrder(previous).stream()
+                                .filter(ExerciseItem::isExcludeFromAiAdjustment)
+                                .toList()) {
+                    items.save(
+                            new ExerciseItem(
+                                    r.getId(),
+                                    main.getId(),
+                                    protectedItem.getName(),
+                                    order++,
+                                    protectedItem.getTargetValue(),
+                                    protectedItem.getTargetUnit(),
+                                    protectedItem.getSets(),
+                                    protectedItem.getRestSeconds(),
+                                    protectedItem.getVideoUrl(),
+                                    protectedItem.getThumbnailUrl(),
+                                    protectedItem.getMemo(),
+                                    true,
+                                    protectedItem.getEditedBy()));
+                }
+            }
+            job.result(r.getId());
+            return r.getId();
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    public AiJob generation(Long id) {
+        return jobs.findByIdAndUserId(id, auth.active().getId())
+                .filter(
+                        j ->
+                                j.getType() == AiJob.Type.ROUTINE_GENERATION
+                                        || j.getType() == AiJob.Type.ROUTINE_ADJUSTMENT)
+                .orElseThrow(() -> ApiException.notFound("루틴 생성 작업을 찾을 수 없습니다."));
+    }
+
+    public Page<Routine> list(int page, int size) {
+        return routines.findByUserIdAndDeletedAtIsNullOrderByUpdatedAtDesc(
+                auth.active().getId(), PageRequest.of(page, Math.min(size, 100)));
+    }
+
+    public Routine owned(Long id) {
+        return routines.findByIdAndUserIdAndDeletedAtIsNull(id, auth.active().getId())
+                .orElseThrow(() -> ApiException.notFound("해당 ID의 루틴을 찾을 수 없습니다."));
+    }
+
+    public Routine today() {
+        Long uid = auth.active().getId();
+        LocalDate now = LocalDate.now();
+        return routines.findFirstByUserIdAndStartDateLessThanEqualAndEndDateGreaterThanEqualAndDeletedAtIsNullOrderByCreatedAtDesc(
+                        uid, now, now)
+                .orElseThrow(() -> ApiException.notFound("오늘 생성된 루틴이 없습니다."));
+    }
+
+    public Detail detail(Long id) {
+        Routine r = owned(id);
+        List<DayView> dv =
+                days.findByRoutineIdOrderByScheduledDate(id).stream()
+                        .map(
+                                d ->
+                                        new DayView(
+                                                d,
+                                                sections
+                                                        .findByRoutineDayIdOrderBySortOrder(
+                                                                d.getId())
+                                                        .stream()
+                                                        .map(
+                                                                s ->
+                                                                        new SectionView(
+                                                                                s,
+                                                                                items
+                                                                                        .findBySectionIdAndDeletedAtIsNullOrderBySortOrder(
+                                                                                                s
+                                                                                                        .getId())))
+                                                        .toList()))
+                        .toList();
+        return new Detail(r, dv);
+    }
+
+    @Transactional
+    public Routine patch(Long id, RoutineRequests.PatchRoutine req) {
+        Routine r = owned(id);
+        r.patch(
+                req.title(),
+                req.description(),
+                req.endDate(),
+                req.aiAdjustmentAllowed(),
+                req.status());
+        return r;
+    }
+
+    @Transactional
+    public ExerciseItem add(Long routineId, Long sectionId, RoutineRequests.ExerciseRequest q) {
+        Routine r = owned(routineId);
+        List<Long> ds =
+                days.findByRoutineIdOrderByScheduledDate(r.getId()).stream()
+                        .map(RoutineDay::getId)
+                        .toList();
+        sections.findByIdAndRoutineDayIdIn(sectionId, ds)
+                .orElseThrow(() -> ApiException.notFound("루틴 구간을 찾을 수 없습니다."));
+        validateUrl(q.videoUrl());
+        List<ExerciseItem> existing =
+                items.findBySectionIdAndDeletedAtIsNullOrderBySortOrder(sectionId);
+        int order = Math.min(q.order(), existing.size() + 1);
+        existing.stream()
+                .filter(x -> x.getSortOrder() >= order)
+                .forEach(x -> x.order(x.getSortOrder() + 1));
+        return items.save(
+                new ExerciseItem(
+                        routineId,
+                        sectionId,
+                        q.name(),
+                        order,
+                        q.targetValue(),
+                        ExerciseItem.Unit.valueOf(q.targetUnit()),
+                        q.sets(),
+                        q.restSeconds(),
+                        q.videoUrl(),
+                        q.thumbnailUrl(),
+                        q.memo(),
+                        q.excludeFromAiAdjustment(),
+                        Routine.Editor.USER));
+    }
+
+    @Transactional
+    public ExerciseItem patchExercise(
+            Long routineId, Long exerciseId, RoutineRequests.PatchExercise q) {
+        owned(routineId);
+        ExerciseItem i =
+                items.findByIdAndRoutineIdAndDeletedAtIsNull(exerciseId, routineId)
+                        .orElseThrow(() -> ApiException.notFound("운동 항목을 찾을 수 없습니다."));
+        validateUrl(q.videoUrl());
+        i.patch(
+                q.name(),
+                q.targetValue(),
+                q.targetUnit(),
+                q.sets(),
+                q.restSeconds(),
+                q.videoUrl(),
+                q.thumbnailUrl(),
+                q.memo(),
+                q.excludeFromAiAdjustment());
+        return i;
+    }
+
+    @Transactional
+    public void deleteExercise(Long r, Long i) {
+        owned(r);
+        items.findByIdAndRoutineIdAndDeletedAtIsNull(i, r)
+                .orElseThrow(() -> ApiException.notFound("운동 항목을 찾을 수 없습니다."))
+                .delete();
+    }
+
+    @Transactional
+    public List<Long> order(Long r, Long s, List<Long> ids) {
+        owned(r);
+        List<ExerciseItem> current = items.findBySectionIdAndDeletedAtIsNullOrderBySortOrder(s);
+        Set<Long> expected =
+                current.stream()
+                        .map(ExerciseItem::getId)
+                        .collect(java.util.stream.Collectors.toSet());
+        if (ids.size() != expected.size()
+                || new HashSet<>(ids).size() != ids.size()
+                || !expected.equals(new HashSet<>(ids)))
+            throw new ApiException(HttpStatus.BAD_REQUEST, "해당 구간의 모든 운동 ID를 중복 없이 전달해야 합니다.");
+        Map<Long, ExerciseItem> map = new HashMap<>();
+        current.forEach(x -> map.put(x.getId(), x));
+        for (int x = 0; x < ids.size(); x++) map.get(ids.get(x)).order(x + 1);
+        return ids;
+    }
+
+    @Transactional
+    public AiJob adjust(Long routineId, RoutineRequests.AdjustmentRequest req, String key) {
+        Routine old = owned(routineId);
+        if (!old.isAiAdjustmentAllowed()) throw ApiException.conflict("AI 재조정이 허용되지 않은 루틴입니다.");
+        try {
+            String payload =
+                    json.writeValueAsString(
+                            Map.of(
+                                    "startDate",
+                                    LocalDate.now(),
+                                    "durationWeeks",
+                                    4,
+                                    "previousRoutineId",
+                                    routineId,
+                                    "reason",
+                                    req.reason(),
+                                    "userMessage",
+                                    Optional.ofNullable(req.userMessage()).orElse("")));
+            return jobs.save(
+                    new AiJob(old.getUserId(), AiJob.Type.ROUTINE_ADJUSTMENT, payload, null, key));
+        } catch (Exception e) {
+            throw ApiException.conflict("같은 재조정 요청이 이미 처리되었습니다.");
+        }
+    }
+
+    private void validateUrl(String u) {
+        if (u != null && !u.isBlank() && !u.startsWith("https://"))
+            throw new ApiException(HttpStatus.BAD_REQUEST, "영상 URL은 HTTPS만 허용합니다.");
+    }
+
+    public record Detail(Routine routine, List<DayView> days) {}
+
+    public record DayView(RoutineDay day, List<SectionView> sections) {}
+
+    public record SectionView(RoutineSection section, List<ExerciseItem> exercises) {}
 }

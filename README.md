@@ -6,7 +6,7 @@
 
 ### 명세서 대비 구현 현황 체크리스트
 
-- [x] **DB / Model:** `DATABASE-SCHEMA.sql`의 기존 9개 테이블을 유지하고 인증·약관·온보딩·건강 문서·AI 작업·루틴 계층·코칭·이용 테이블을 추가한 Flyway `V1` 구현
+- [x] **DB / Model:** 기존 9개 테이블과 인증·약관·온보딩·건강 문서·AI 작업·루틴 계층·코칭·이용 테이블을 구성한 Flyway `V1`, 타입별 액티비티와 혼합 커리큘럼을 추가한 `V2` 구현
 - [x] **API Endpoints — 인증/사용자:** Google OIDC 로그인, Refresh Token Rotation, 로그아웃, 약관, 온보딩, 내 프로필
 - [x] **API Endpoints — 건강/분석:** 문서 업로드·목록·삭제, 분석 생성·이력·최신·단건 조회
 - [x] **API Endpoints — 루틴/기록:** 생성 상태, 오늘/전체/상세, 루틴 수정, 운동 추가·수정·삭제·순서 변경, 재조정, 기록, 최신 코칭
@@ -25,6 +25,8 @@
 - 분석 이력 및 최신/단건 결과 재조회
 - 16개 운동 예시를 포함한 루틴 생성, 전체 계층 조회, 사용자 편집 표시, 수정 보호, 순서 무결성 검증, 낙관적 락
 - 운동 완료 중복 차단, 수행 기록 보존, 별도 코칭 작업 생성
+- 운동·재활·식단·체중·컨디션·기타 타입별 액티비티 자유 기록과 타입 필터 조회
+- 한 전문가 커리큘럼에 운동·재활·식단 항목을 함께 담는 `MIXED` 커리큘럼
 - 공통 응답/오류, Bean Validation, Request ID, Swagger UI, Actuator liveness/readiness
 - Multi-stage Dockerfile과 MySQL 8·Redis·MinIO·버킷 초기화 Compose 구성
 
@@ -59,6 +61,35 @@ docker compose logs -f app
 - Readiness: `http://localhost:8080/actuator/health/readiness`
 - MinIO Console: `http://localhost:9001`
 
+## Swagger UI 사용법
+
+서버를 실행한 뒤 브라우저에서 다음 주소를 엽니다.
+
+```text
+http://localhost:8080/swagger-ui.html
+```
+
+OpenAPI 원본 JSON은 다음 주소에서 확인할 수 있습니다.
+
+```text
+http://localhost:8080/v3/api-docs
+```
+
+로컬에서 인증 API까지 테스트하는 순서는 다음과 같습니다.
+
+1. `POST /api/v1/auth/oauth/google`을 열고 **Try it out**을 누릅니다.
+2. Request Body의 `idToken`에 `local:swagger-user:swagger@example.com:Swagger User`를 입력하고 실행합니다.
+3. 응답의 `data.accessToken` 값만 복사합니다.
+4. Swagger 화면 오른쪽 위 **Authorize** 버튼을 누릅니다.
+5. 입력란에는 `Bearer`를 붙이지 않고 복사한 Access Token만 입력합니다.
+6. 약관 동의 → 온보딩 → 건강 문서 업로드 순서로 보호 API를 실행합니다.
+
+Swagger UI가 같은 서버에서 제공되므로 local 프로필에서는 로그인 응답의 HttpOnly Refresh Cookie도 브라우저 Cookie Jar에 보관됩니다. `POST /auth/token/refresh` 실행 시 Request Body나 Access Token은 필요하지 않습니다.
+
+건강 문서 업로드는 Swagger의 파일 선택 버튼에서 JPG, PNG 또는 PDF 파일을 선택합니다. AI 분석과 루틴 생성은 `202 Accepted` 이후 상태 조회 API를 약 1초 간격으로 다시 실행해 `COMPLETED` 여부를 확인합니다.
+
+Swagger에서 자물쇠가 표시된 API는 Access Token이 필요합니다. Google 로그인과 Refresh Token 재발급 API는 공개 API로 표시됩니다.
+
 종료 시 데이터 볼륨을 보존합니다.
 
 ```bash
@@ -79,6 +110,29 @@ docker compose down
 
 Fake OCR/LLM은 네트워크 없이 결정적인 분석·루틴·코칭 결과를 생성합니다. 실제 Google 검증은 `local`, `test`가 아닌 프로필에서 issuer JWK와 `GOOGLE_CLIENT_ID` audience를 검증합니다.
 
+## Postman 로컬 API 테스트
+
+다음 두 파일을 Postman에서 각각 Import합니다.
+
+- Collection: [`postman/Tri-Lion-Health.postman_collection.json`](./postman/Tri-Lion-Health.postman_collection.json)
+- Environment: [`postman/Tri-Lion-Health.local.postman_environment.json`](./postman/Tri-Lion-Health.local.postman_environment.json)
+
+Postman 우측 상단 Environment에서 `Tri Lion Health - Local`을 선택한 뒤 컬렉션 요청을 번호 순서대로 실행합니다. 로그인 응답에서 Access Token을 저장하고 이후 문서·분석·루틴·운동·기록 ID도 테스트 스크립트가 자동 저장합니다.
+
+`6. 건강 문서 업로드`에서 파일이 자동 선택되지 않으면 프로젝트의 `postman/fixtures/sample-health.pdf`를 한 번 직접 선택합니다. Collection Runner로 전체 실행할 때는 비동기 Worker 처리를 위해 요청 간 Delay를 `1000ms`로 설정합니다. 분석 또는 루틴 상태가 아직 `PENDING/PROCESSING`이면 해당 상태 조회 요청을 1초 뒤 다시 실행합니다.
+
+로컬 HTTP 테스트에서는 Postman Cookie Jar가 Refresh Token을 전송할 수 있도록 `local` 프로필에 한해 `Secure=false`를 사용합니다. 다른 프로필의 기본값은 `Secure=true`입니다.
+
+전문가 혼합 커리큘럼 API는 승인 전문가만 사용할 수 있습니다. Postman의 `32. 전문가 인증 신청`을 실행한 다음 로컬 테스트에서만 아래 명령으로 가장 최근 신청자를 승인하고 `33. 운동·재활·식단 혼합 커리큘럼 등록`을 다시 실행합니다.
+
+```bash
+docker compose exec mysql mysql \
+  -uaac_user -paac_password aac_wellness \
+  -e "UPDATE experts SET verification_status='APPROVED' ORDER BY applied_at DESC LIMIT 1;"
+```
+
+운영 환경에서는 DB를 직접 변경하지 않고 별도의 관리자 심사 흐름을 사용해야 합니다.
+
 ## 빌드 및 테스트
 
 ```bash
@@ -94,6 +148,8 @@ docker compose --env-file .env.example config --quiet
 - 약관 전 건강 API 차단
 - 로그인 → 약관 → 온보딩 → 문서 → 분석 → 루틴 → 편집 → 기록 → 코칭 통합 흐름
 - Flyway 초기 Migration과 JPA 모델 스키마 검증(H2 MySQL 호환 모드)
+- 운동·재활·식단 기록 생성 및 타입 필터, 잘못된 타입 거부
+- 운동·식단 혼합 전문가 커리큘럼 생성과 단일 타입 불일치 거부
 
 ## 환경 변수
 

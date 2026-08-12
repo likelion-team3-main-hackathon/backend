@@ -1,2 +1,51 @@
-package tri_lion.health.domain.record;import jakarta.persistence.*;import java.time.Instant;import lombok.*;import org.hibernate.annotations.JdbcTypeCode;import org.hibernate.type.SqlTypes;
-@Entity@Table(name="coachings")@Getter@NoArgsConstructor(access=AccessLevel.PROTECTED)public class Coaching{@Id@GeneratedValue(strategy=GenerationType.IDENTITY)@Column(name="coaching_id")private Long id;@Column(name="user_id")private Long userId;@Column(name="trigger_record_id")private Long triggerRecordId;private String type;private String title;private String message;@JdbcTypeCode(SqlTypes.JSON)private String actions;@Column(name="safety_level")private String safetyLevel;private String disclaimer;@Column(name="created_at")private Instant createdAt;public Coaching(Long u,Long record,String message){userId=u;triggerRecordId=record;type="AFTER_RECORD";title="오늘 기록을 잘 남겼어요";this.message=message;actions="[]";safetyLevel="NORMAL";disclaimer="통증이 지속되거나 심해지면 의료 전문가와 상담하세요.";createdAt=Instant.now();}}
+package tri_lion.health.domain.record;
+
+import jakarta.persistence.*;
+import java.time.Instant;
+import lombok.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
+@Entity
+@Table(name = "coachings")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class Coaching {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "coaching_id")
+    private Long id;
+
+    @Column(name = "user_id")
+    private Long userId;
+
+    @Column(name = "trigger_record_id")
+    private Long triggerRecordId;
+
+    private String type;
+    private String title;
+    private String message;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    private String actions;
+
+    @Column(name = "safety_level")
+    private String safetyLevel;
+
+    private String disclaimer;
+
+    @Column(name = "created_at")
+    private Instant createdAt;
+
+    public Coaching(Long u, Long record, String message) {
+        userId = u;
+        triggerRecordId = record;
+        type = "AFTER_RECORD";
+        title = "오늘 기록을 잘 남겼어요";
+        this.message = message;
+        actions = "[]";
+        safetyLevel = "NORMAL";
+        disclaimer = "통증이 지속되거나 심해지면 의료 전문가와 상담하세요.";
+        createdAt = Instant.now();
+    }
+}

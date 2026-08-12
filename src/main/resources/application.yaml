@@ -44,10 +44,21 @@ app:
   google:
     client-id: ${GOOGLE_CLIENT_ID:local-client}
     issuer: ${GOOGLE_ISSUER:https://accounts.google.com}
+  auth:
+    refresh-cookie-secure: ${REFRESH_COOKIE_SECURE:true}
   storage:
     endpoint: ${OBJECT_STORAGE_ENDPOINT:http://localhost:9000}
     private-bucket: ${OBJECT_STORAGE_BUCKET_PRIVATE:health-private}
     public-bucket: ${OBJECT_STORAGE_BUCKET_PUBLIC:health-public}
+
+---
+spring:
+  config.activate.on-profile: local
+
+app:
+  auth:
+    refresh-cookie-secure: false
+  adapters.fake: true
 
 ---
 spring:
@@ -61,4 +72,6 @@ spring:
   flyway.enabled: false
 
 app:
+  auth:
+    refresh-cookie-secure: false
   adapters.fake: true

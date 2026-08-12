@@ -1,0 +1,321 @@
+{
+  "info": {
+    "_postman_id": "b6cf9c64-2d9a-4e84-a547-190ae77cf81e",
+    "name": "Tri Lion Health - Local Core Flow",
+    "description": "local 프로필의 Fake Google/OCR/LLM으로 핵심 MVP 플로우를 순서대로 검증합니다. Collection Runner에서는 요청 간 delay를 1000ms로 설정하세요.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.environment.set('today', new Date().toISOString().slice(0, 10));",
+          "pm.environment.set('now', new Date().toISOString());"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "00. 상태 확인",
+      "auth": { "type": "noauth" },
+      "request": { "method": "GET", "url": "http://localhost:8080/actuator/health/readiness" },
+      "event": [{ "listen": "test", "script": { "exec": ["pm.test('서버가 준비됨', () => pm.response.to.have.status(200));", "pm.expect(pm.response.json().status).to.eql('UP');"] } }]
+    },
+    {
+      "name": "01. 인증 및 사용자",
+      "item": [
+        {
+          "name": "1. Google Fake 로그인",
+          "auth": { "type": "noauth" },
+          "event": [
+            { "listen": "prerequest", "script": { "exec": ["const runId = Date.now().toString();", "pm.environment.set('run_id', runId);", "pm.environment.set('local_id_token', `local:postman-${runId}:postman-${runId}@example.com:Postman User`);"] } },
+            { "listen": "test", "script": { "exec": ["pm.test('신규 또는 기존 로그인 성공', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));", "const data = pm.response.json().data;", "pm.environment.set('access_token', data.accessToken);", "pm.environment.set('user_id', data.userId);", "pm.test('Access Token 저장됨', () => pm.expect(data.accessToken).to.be.a('string').and.not.empty);", "pm.test('Refresh Cookie 발급됨', () => pm.expect(pm.cookies.has('refresh_token')).to.be.true);"] } }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"idToken\": \"{{local_id_token}}\"\n}" },
+            "url": "{{base_url}}/auth/oauth/google"
+          }
+        },
+        {
+          "name": "2. 약관 전 건강 API 차단 확인",
+          "request": { "method": "GET", "url": "{{base_url}}/health-documents?page=0&size=20" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('온보딩 전 접근 차단', () => pm.response.to.have.status(403));"] } }]
+        },
+        {
+          "name": "3. 필수 약관 동의",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"agreements\": [\n    {\"type\": \"TERMS_OF_SERVICE\", \"agreed\": true},\n    {\"type\": \"PRIVACY\", \"agreed\": true},\n    {\"type\": \"SENSITIVE_HEALTH_DATA\", \"agreed\": true},\n    {\"type\": \"MARKETING\", \"agreed\": false}\n  ]\n}" },
+            "url": "{{base_url}}/users/me/agreements"
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('약관 저장 성공', () => pm.response.to.have.status(200));", "pm.expect(pm.response.json().data.nextStep).to.eql('ONBOARDING');"] } }]
+        },
+        {
+          "name": "4. 온보딩",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Postman 사용자\",\n  \"birthDate\": \"1998-03-12\",\n  \"gender\": \"FEMALE\",\n  \"heightCm\": 163.5,\n  \"weightKg\": 58.2,\n  \"goals\": [\"WEIGHT_LOSS\", \"POSTURE_CORRECTION\"],\n  \"targetWeightKg\": 53.0,\n  \"activityLevel\": \"LIGHT\",\n  \"availableExerciseDays\": [\"MONDAY\", \"WEDNESDAY\", \"SATURDAY\"],\n  \"availableExerciseMinutes\": 40,\n  \"dietaryPreferences\": [\"KOREAN\", \"HIGH_PROTEIN\"],\n  \"allergies\": [\"PEANUT\"],\n  \"dislikedFoods\": [\"오이\"],\n  \"injuries\": [{\"bodyPart\": \"LEFT_KNEE\", \"description\": \"점프 동작 시 통증\"}]\n}" },
+            "url": "{{base_url}}/users/me/onboarding"
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('온보딩 성공', () => pm.response.to.have.status(200));", "pm.expect(pm.response.json().data.onboardingCompleted).to.be.true;"] } }]
+        },
+        {
+          "name": "5. 내 프로필",
+          "request": { "method": "GET", "url": "{{base_url}}/users/me/profile" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('프로필 조회 성공', () => pm.response.to.have.status(200));", "pm.expect(pm.response.json().data.status).to.eql('ACTIVE');"] } }]
+        }
+      ]
+    },
+    {
+      "name": "02. 건강 문서 및 분석",
+      "item": [
+        {
+          "name": "6. 건강 문서 업로드",
+          "request": {
+            "method": "POST",
+            "body": { "mode": "formdata", "formdata": [
+              { "key": "file", "type": "file", "src": "postman/fixtures/sample-health.pdf" },
+              { "key": "documentType", "type": "text", "value": "INBODY" },
+              { "key": "measuredAt", "type": "text", "value": "{{today}}" }
+            ] },
+            "url": "{{base_url}}/health-documents"
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('문서 업로드 성공', () => pm.response.to.have.status(201));", "pm.environment.set('document_id', pm.response.json().data.documentId);"] } }]
+        },
+        {
+          "name": "7. 건강 문서 목록",
+          "request": { "method": "GET", "url": "{{base_url}}/health-documents?page=0&size=20" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('문서 목록 조회 성공', () => pm.response.to.have.status(200));", "pm.expect(pm.response.json().data.content.length).to.be.above(0);"] } }]
+        },
+        {
+          "name": "8. 건강 분석 요청",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "analysis-{{run_id}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"documentIds\": [{{document_id}}]\n}" },
+            "url": "{{base_url}}/health-analyses"
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('분석 접수 성공', () => pm.response.to.have.status(202));", "pm.environment.set('analysis_id', pm.response.json().data.analysisId);"] } }]
+        },
+        {
+          "name": "9. 분석 상태 조회",
+          "request": { "method": "GET", "url": "{{base_url}}/health-analyses/{{analysis_id}}" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('분석 조회 성공', () => pm.response.to.have.status(200));", "const status = pm.response.json().data.status;", "pm.test('분석 완료', () => pm.expect(status).to.eql('COMPLETED'));", "if (status !== 'COMPLETED') console.warn('아직 처리 중입니다. 1초 후 이 요청을 다시 보내세요.');"] } }]
+        },
+        {
+          "name": "10. 분석 이력",
+          "request": { "method": "GET", "url": "{{base_url}}/health-analyses?status=COMPLETED&page=0&size=10" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('분석 이력 조회 성공', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "11. 최신 분석",
+          "request": { "method": "GET", "url": "{{base_url}}/health-analyses/latest" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('최신 분석 조회 성공', () => pm.response.to.have.status(200));", "pm.expect(pm.response.json().data.id).to.eql(Number(pm.environment.get('analysis_id')));"] } }]
+        }
+      ]
+    },
+    {
+      "name": "03. 루틴",
+      "item": [
+        {
+          "name": "12. 맞춤 루틴 생성 요청",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "routine-{{run_id}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"analysisId\": {{analysis_id}},\n  \"startDate\": \"{{today}}\",\n  \"durationWeeks\": 4,\n  \"mealCountPerDay\": 3,\n  \"exerciseDaysPerWeek\": 3,\n  \"preferredExerciseTypes\": [\"PILATES\", \"WALKING\"],\n  \"includeExpertContents\": false\n}" },
+            "url": "{{base_url}}/routines/generations"
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('루틴 생성 접수 성공', () => pm.response.to.have.status(202));", "pm.environment.set('generation_id', pm.response.json().data.generationId);"] } }]
+        },
+        {
+          "name": "13. 루틴 생성 상태 조회",
+          "request": { "method": "GET", "url": "{{base_url}}/routines/generations/{{generation_id}}" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('생성 상태 조회 성공', () => pm.response.to.have.status(200));", "const data = pm.response.json().data;", "if (data.routineId) pm.environment.set('routine_id', data.routineId);", "pm.test('루틴 생성 완료', () => pm.expect(data.status).to.eql('COMPLETED'));", "if (data.status !== 'COMPLETED') console.warn('아직 처리 중입니다. 1초 후 이 요청을 다시 보내세요.');"] } }]
+        },
+        {
+          "name": "14. 전체 루틴 목록",
+          "request": { "method": "GET", "url": "{{base_url}}/routines?page=0&size=20" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('전체 루틴 조회 성공', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "15. 오늘의 루틴",
+          "request": { "method": "GET", "url": "{{base_url}}/routines/today" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('오늘의 루틴 조회 성공', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "16. 루틴 전체 상세 및 ID 저장",
+          "request": { "method": "GET", "url": "{{base_url}}/routines/{{routine_id}}" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('루틴 상세 조회 성공', () => pm.response.to.have.status(200));", "const data = pm.response.json().data;", "const section = data.days[0].sections[0];", "pm.environment.set('section_id', section.sectionId);", "pm.environment.set('exercise_id', section.exercises[0].exerciseId);", "pm.environment.set('exercise_ids_json', JSON.stringify(section.exercises.map(x => x.exerciseId).reverse()));", "pm.test('16개 운동 표현 가능', () => { const count = data.days.flatMap(d => d.sections).flatMap(s => s.exercises).length; pm.expect(count).to.be.at.least(16); });"] } }]
+        },
+        {
+          "name": "17. 루틴 기본 정보 수정",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Postman에서 수정한 루틴\",\n  \"description\": \"로컬 API 테스트\",\n  \"aiAdjustmentAllowed\": true\n}" },
+            "url": "{{base_url}}/routines/{{routine_id}}"
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('루틴 수정 성공', () => pm.response.to.have.status(200));", "pm.expect(pm.response.json().data.lastModifiedBy).to.eql('USER');"] } }]
+        },
+        {
+          "name": "18. 운동 항목 추가",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"버드독\",\n  \"order\": 3,\n  \"targetValue\": 12,\n  \"targetUnit\": \"REPETITIONS\",\n  \"sets\": 2,\n  \"restSeconds\": 20,\n  \"videoUrl\": \"https://cdn.example.com/exercises/bird-dog.mp4\",\n  \"thumbnailUrl\": \"https://cdn.example.com/exercises/bird-dog.jpg\",\n  \"memo\": \"좌우 6회씩 천천히 수행\",\n  \"excludeFromAiAdjustment\": true\n}" },
+            "url": "{{base_url}}/routines/{{routine_id}}/sections/{{section_id}}/exercises"
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('운동 추가 성공', () => pm.response.to.have.status(201));", "pm.environment.set('new_exercise_id', pm.response.json().data.exerciseId);"] } }]
+        },
+        {
+          "name": "19. 운동 항목 수정",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"targetValue\": 40,\n  \"targetUnit\": \"SECONDS\",\n  \"sets\": 2,\n  \"restSeconds\": 20,\n  \"videoUrl\": \"https://cdn.example.com/exercises/plank-beginner.mp4\",\n  \"excludeFromAiAdjustment\": true\n}" },
+            "url": "{{base_url}}/routines/{{routine_id}}/exercises/{{exercise_id}}"
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('운동 수정 성공', () => pm.response.to.have.status(200));", "pm.expect(pm.response.json().data.editedBy).to.eql('USER');"] } }]
+        },
+        {
+          "name": "20. 운동 추가 후 상세 재조회",
+          "request": { "method": "GET", "url": "{{base_url}}/routines/{{routine_id}}" },
+          "event": [{ "listen": "test", "script": { "exec": ["const data = pm.response.json().data;", "const section = data.days[0].sections.find(s => String(s.sectionId) === String(pm.environment.get('section_id')));", "pm.environment.set('exercise_ids_json', JSON.stringify(section.exercises.map(x => x.exerciseId).reverse()));", "pm.test('운동 전체 ID 저장', () => pm.expect(section.exercises.length).to.be.above(0));"] } }]
+        },
+        {
+          "name": "21. 운동 순서 변경",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"exerciseIds\": {{exercise_ids_json}}\n}" },
+            "url": "{{base_url}}/routines/{{routine_id}}/sections/{{section_id}}/exercise-order"
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('운동 순서 변경 성공', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "22. 추가 운동 삭제",
+          "request": { "method": "DELETE", "url": "{{base_url}}/routines/{{routine_id}}/exercises/{{new_exercise_id}}" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('운동 삭제 성공', () => pm.response.to.have.status(200));"] } }]
+        }
+      ]
+    },
+    {
+      "name": "04. 수행 기록 및 코칭",
+      "item": [
+        {
+          "name": "23. 운동 수행 기록",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"routineItemId\": {{exercise_id}},\n  \"type\": \"EXERCISE\",\n  \"recordedAt\": \"{{now}}\",\n  \"details\": {\"durationMinutes\": 28, \"intensity\": \"LIGHT\", \"completed\": true},\n  \"condition\": {\"energyLevel\": 4, \"painLevel\": 1, \"memo\": \"통증 없이 완료\"}\n}" },
+            "url": "{{base_url}}/routine-records"
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('기록 등록 성공', () => pm.response.to.have.status(201));", "pm.environment.set('record_id', pm.response.json().data.recordId);"] } }]
+        },
+        {
+          "name": "24. 자유 재활 기록",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"type\": \"REHABILITATION\",\n  \"recordedAt\": \"{{now}}\",\n  \"details\": {\"program\": \"무릎 가동 범위 훈련\", \"durationMinutes\": 20, \"completed\": true},\n  \"condition\": {\"energyLevel\": 3, \"painLevel\": 1, \"memo\": \"가벼운 재활 완료\"}\n}" },
+            "url": "{{base_url}}/routine-records"
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('재활 기록 등록 성공', () => pm.response.to.have.status(201));", "pm.expect(pm.response.json().data.activityType).to.eql('REHABILITATION');", "pm.expect(pm.response.json().data.routineItemStatus).to.eql('NOT_LINKED');"] } }]
+        },
+        {
+          "name": "25. 자유 식단 기록",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"type\": \"MEAL\",\n  \"recordedAt\": \"{{now}}\",\n  \"details\": {\"mealType\": \"LUNCH\", \"menu\": [\"현미밥\", \"닭가슴살\"], \"calories\": 520}\n}" },
+            "url": "{{base_url}}/routine-records"
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('식단 기록 등록 성공', () => pm.response.to.have.status(201));", "pm.expect(pm.response.json().data.activityType).to.eql('MEAL');"] } }]
+        },
+        {
+          "name": "26. 재활 타입 필터 조회",
+          "request": { "method": "GET", "url": "{{base_url}}/routine-records?date={{today}}&type=REHABILITATION" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('재활 기록만 조회 성공', () => pm.response.to.have.status(200));", "pm.response.json().data.forEach(record => pm.expect(record.type).to.eql('REHABILITATION'));"] } }]
+        },
+        {
+          "name": "27. 일자별 전체 수행 기록",
+          "request": { "method": "GET", "url": "{{base_url}}/routine-records?date={{today}}" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('기록 조회 성공', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "28. 최신 AI 코칭",
+          "request": { "method": "GET", "url": "{{base_url}}/coachings/latest" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('코칭 조회 성공', () => pm.response.to.have.status(200));", "pm.expect(pm.response.json().data.disclaimer).to.be.a('string');"] } }]
+        },
+        {
+          "name": "29. 루틴 재조정 요청",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "adjustment-{{run_id}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"reason\": \"CONDITION_CHANGED\",\n  \"userMessage\": \"하루 운동 가능 시간이 20분으로 줄었습니다.\"\n}" },
+            "url": "{{base_url}}/routines/{{routine_id}}/adjustments"
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('재조정 접수 성공', () => pm.response.to.have.status(202));"] } }]
+        }
+      ]
+    },
+    {
+      "name": "05. 세션",
+      "item": [
+        {
+          "name": "30. Refresh Token Rotation",
+          "auth": { "type": "noauth" },
+          "request": { "method": "POST", "url": "{{base_url}}/auth/token/refresh" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('토큰 재발급 성공', () => pm.response.to.have.status(200));", "pm.environment.set('access_token', pm.response.json().data.accessToken);"] } }]
+        },
+        {
+          "name": "31. 로그아웃",
+          "request": { "method": "POST", "url": "{{base_url}}/auth/logout" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('로그아웃 성공', () => pm.response.to.have.status(200));"] } }]
+        }
+      ]
+    },
+    {
+      "name": "06. 전문가 혼합 커리큘럼",
+      "description": "인증 상태가 APPROVED인 전문가 계정으로 테스트합니다. 일반 사용자라면 403이 정상입니다.",
+      "item": [
+        {
+          "name": "32. 전문가 인증 신청",
+          "request": {
+            "method": "POST",
+            "body": { "mode": "formdata", "formdata": [
+              { "key": "expertType", "type": "text", "value": "TRAINER" },
+              { "key": "specialties", "type": "text", "value": "운동" },
+              { "key": "specialties", "type": "text", "value": "재활" },
+              { "key": "specialties", "type": "text", "value": "영양" },
+              { "key": "introduction", "type": "text", "value": "운동·재활·식단 통합 전문가" }
+            ] },
+            "url": "{{base_url}}/expert-applications"
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('신규 신청 또는 기존 신청 확인', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));", "console.warn('혼합 커리큘럼 생성 전 README의 SQL로 전문가를 APPROVED 처리하세요.');"] } }]
+        },
+        {
+          "name": "33. 운동·재활·식단 혼합 커리큘럼 등록",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"운동·재활·식단 통합 프로그램\",\n  \"description\": \"운동과 회복, 식단을 함께 관리합니다.\",\n  \"category\": \"WELLNESS\",\n  \"difficulty\": \"BEGINNER\",\n  \"contentType\": \"MIXED\",\n  \"durationWeeks\": 4,\n  \"sessionsPerWeek\": 5,\n  \"price\": 39000,\n  \"targetGoals\": [\"GENERAL_WELLNESS\"],\n  \"contraindications\": [],\n  \"items\": [\n    {\"week\": 1, \"order\": 1, \"activityType\": \"EXERCISE\", \"title\": \"저강도 걷기\", \"durationMinutes\": 20, \"details\": {\"intensity\": \"LIGHT\"}},\n    {\"week\": 1, \"order\": 2, \"activityType\": \"REHABILITATION\", \"title\": \"무릎 가동 범위 훈련\", \"durationMinutes\": 15, \"details\": {\"bodyPart\": \"LEFT_KNEE\"}},\n    {\"week\": 1, \"order\": 3, \"activityType\": \"MEAL\", \"title\": \"고단백 점심\", \"scheduledTime\": \"12:00:00\", \"details\": {\"proteinGrams\": 30}}\n  ]\n}" },
+            "url": "{{base_url}}/expert-contents"
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('승인 전문가는 생성, 일반 사용자는 차단', () => pm.expect(pm.response.code).to.be.oneOf([201, 403]));", "if (pm.response.code === 201) { pm.expect(pm.response.json().data.contentType).to.eql('MIXED'); pm.expect(pm.response.json().data.activityTypes.length).to.eql(3); } else { console.warn('현재 계정이 승인 전문가가 아니어서 403입니다. README의 로컬 전문가 승인 절차를 확인하세요.'); }"] } }]
+        }
+      ]
+    }
+  ]
+}

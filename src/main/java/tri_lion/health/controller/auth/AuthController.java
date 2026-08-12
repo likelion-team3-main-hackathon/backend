@@ -1,3 +1,103 @@
 package tri_lion.health.controller.auth;
-import jakarta.servlet.http.*; import jakarta.validation.Valid; import jakarta.validation.constraints.NotBlank; import java.time.Duration; import java.util.List; import org.springframework.http.*; import org.springframework.web.bind.annotation.*; import tri_lion.health.common.response.ApiResponse; import tri_lion.health.service.auth.AuthService;
-@RestController @RequestMapping("/api/v1/auth") public class AuthController {private final AuthService service;public AuthController(AuthService s){service=s;} @PostMapping("/oauth/google") ResponseEntity<ApiResponse<LoginResponse>> login(@Valid @RequestBody LoginRequest r,HttpServletRequest req,HttpServletResponse res){var l=service.login(r.idToken(),req.getHeader("User-Agent"));cookie(res,l.tokens().refresh(),l.tokens().refreshSeconds());int code=l.fresh()?201:200;return ResponseEntity.status(code).body(ApiResponse.success(code,"Google 소셜 로그인 성공",new LoginResponse(l.user().getId(),l.tokens().access(),l.tokens().accessSeconds(),l.fresh(),l.user().isOnboardingCompleted(),l.fresh()?List.of("TERMS_OF_SERVICE","PRIVACY","SENSITIVE_HEALTH_DATA"):null)));} @PostMapping("/token/refresh") ApiResponse<TokenResponse> refresh(@CookieValue(name="refresh_token",required=false)String raw,HttpServletRequest req,HttpServletResponse res){var t=service.refresh(raw,req.getHeader("User-Agent"));cookie(res,t.refresh(),t.refreshSeconds());return ApiResponse.success(200,"토큰 재발급 성공",new TokenResponse(t.access(),t.accessSeconds()));} @PostMapping("/logout") ApiResponse<Void> logout(@CookieValue(name="refresh_token",required=false)String raw,HttpServletResponse res){service.logout(raw);ResponseCookie c=ResponseCookie.from("refresh_token","").httpOnly(true).secure(true).sameSite("Lax").path("/api/v1/auth").maxAge(0).build();res.addHeader(HttpHeaders.SET_COOKIE,c.toString());return ApiResponse.success(200,"로그아웃 성공",null);} private void cookie(HttpServletResponse res,String token,long seconds){res.addHeader(HttpHeaders.SET_COOKIE,ResponseCookie.from("refresh_token",token).httpOnly(true).secure(true).sameSite("Lax").path("/api/v1/auth").maxAge(Duration.ofSeconds(seconds)).build().toString());} public record LoginRequest(@NotBlank String idToken){} public record LoginResponse(Long userId,String accessToken,long accessTokenExpiresIn,boolean isNewUser,boolean onboardingCompleted,List<String> requiredAgreements){} public record TokenResponse(String accessToken,long accessTokenExpiresIn){} }
+
+import jakarta.servlet.http.*;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import java.time.Duration;
+import java.util.List;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.*;
+import org.springframework.web.bind.annotation.*;
+import tri_lion.health.common.response.ApiResponse;
+import tri_lion.health.service.auth.AuthService;
+
+@RestController
+@RequestMapping("/api/v1/auth")
+public class AuthController {
+    private final AuthService service;
+    private final boolean secureCookie;
+
+    public AuthController(
+            AuthService s, @Value("${app.auth.refresh-cookie-secure:true}") boolean secureCookie) {
+        service = s;
+        this.secureCookie = secureCookie;
+    }
+
+    @PostMapping("/oauth/google")
+    ResponseEntity<ApiResponse<LoginResponse>> login(
+            @Valid @RequestBody LoginRequest r, HttpServletRequest req, HttpServletResponse res) {
+        var l = service.login(r.idToken(), req.getHeader("User-Agent"));
+        cookie(res, l.tokens().refresh(), l.tokens().refreshSeconds());
+        int code = l.fresh() ? 201 : 200;
+        return ResponseEntity.status(code)
+                .body(
+                        ApiResponse.success(
+                                code,
+                                "Google 소셜 로그인 성공",
+                                new LoginResponse(
+                                        l.user().getId(),
+                                        l.tokens().access(),
+                                        l.tokens().accessSeconds(),
+                                        l.fresh(),
+                                        l.user().isOnboardingCompleted(),
+                                        l.fresh()
+                                                ? List.of(
+                                                        "TERMS_OF_SERVICE",
+                                                        "PRIVACY",
+                                                        "SENSITIVE_HEALTH_DATA")
+                                                : null)));
+    }
+
+    @PostMapping("/token/refresh")
+    ApiResponse<TokenResponse> refresh(
+            @CookieValue(name = "refresh_token", required = false) String raw,
+            HttpServletRequest req,
+            HttpServletResponse res) {
+        var t = service.refresh(raw, req.getHeader("User-Agent"));
+        cookie(res, t.refresh(), t.refreshSeconds());
+        return ApiResponse.success(
+                200, "토큰 재발급 성공", new TokenResponse(t.access(), t.accessSeconds()));
+    }
+
+    @PostMapping("/logout")
+    ApiResponse<Void> logout(
+            @CookieValue(name = "refresh_token", required = false) String raw,
+            HttpServletResponse res) {
+        service.logout(raw);
+        ResponseCookie c =
+                ResponseCookie.from("refresh_token", "")
+                        .httpOnly(true)
+                        .secure(secureCookie)
+                        .sameSite("Lax")
+                        .path("/api/v1/auth")
+                        .maxAge(0)
+                        .build();
+        res.addHeader(HttpHeaders.SET_COOKIE, c.toString());
+        return ApiResponse.success(200, "로그아웃 성공", null);
+    }
+
+    private void cookie(HttpServletResponse res, String token, long seconds) {
+        res.addHeader(
+                HttpHeaders.SET_COOKIE,
+                ResponseCookie.from("refresh_token", token)
+                        .httpOnly(true)
+                        .secure(secureCookie)
+                        .sameSite("Lax")
+                        .path("/api/v1/auth")
+                        .maxAge(Duration.ofSeconds(seconds))
+                        .build()
+                        .toString());
+    }
+
+    public record LoginRequest(@NotBlank String idToken) {}
+
+    public record LoginResponse(
+            Long userId,
+            String accessToken,
+            long accessTokenExpiresIn,
+            boolean isNewUser,
+            boolean onboardingCompleted,
+            List<String> requiredAgreements) {}
+
+    public record TokenResponse(String accessToken, long accessTokenExpiresIn) {}
+}
