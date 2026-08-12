@@ -21,9 +21,9 @@ application-secret*.yaml
 application-secret*.properties
 
 ### Secrets / credentials / certificates ###
-secrets/
-secret/
-credentials/
+/secrets/
+/secret/
+/credentials/
 *.pem
 *.key
 *.p8
@@ -38,10 +38,10 @@ credentials/
 *secret*.json
 
 ### Runtime data that may contain user or health information ###
-uploads/
-storage/
-data/
-logs/
+/uploads/
+/storage/
+/data/
+/logs/
 *.log
 *.dump
 *.sql.gz
