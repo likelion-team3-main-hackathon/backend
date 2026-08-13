@@ -2,6 +2,7 @@ package tri_lion.health.external.oauth;
 
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.*;
 import org.springframework.security.oauth2.jwt.*;
 import tri_lion.health.exception.ApiException;
@@ -9,7 +10,10 @@ import tri_lion.health.exception.ApiException;
 @Configuration
 public class GoogleVerifierAdapters {
     @Bean
-    @Profile({"local", "test"})
+    @ConditionalOnProperty(
+            name = "app.google.fake-enabled",
+            havingValue = "true",
+            matchIfMissing = true)
     GoogleIdTokenVerifier fakeGoogleVerifier() {
         return token -> {
             if (token == null || !token.startsWith("local:"))
@@ -31,7 +35,7 @@ public class GoogleVerifierAdapters {
     }
 
     @Bean
-    @Profile("!local & !test")
+    @ConditionalOnProperty(name = "app.google.fake-enabled", havingValue = "false")
     GoogleIdTokenVerifier googleVerifier(
             @Value("${app.google.issuer}") String issuer,
             @Value("${app.google.client-id}") String clientId) {

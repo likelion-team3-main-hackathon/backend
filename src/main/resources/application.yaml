@@ -44,6 +44,7 @@ app:
   google:
     client-id: ${GOOGLE_CLIENT_ID:local-client}
     issuer: ${GOOGLE_ISSUER:https://accounts.google.com}
+    fake-enabled: ${GOOGLE_FAKE_ENABLED:true}
   auth:
     refresh-cookie-secure: ${REFRESH_COOKIE_SECURE:true}
   storage:
