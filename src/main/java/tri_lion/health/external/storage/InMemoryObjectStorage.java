@@ -5,7 +5,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 @Component
-@Profile({"local", "test"})
+@Profile({"local", "test", "dev"})
 public class InMemoryObjectStorage implements ObjectStorage {
     private final ConcurrentHashMap<String, byte[]> files = new ConcurrentHashMap<>();
 

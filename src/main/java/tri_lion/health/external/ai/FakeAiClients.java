@@ -3,7 +3,7 @@ package tri_lion.health.external.ai;
 import org.springframework.context.annotation.*;
 
 @Configuration
-@Profile({"local", "test"})
+@Profile({"local", "test", "dev"})
 public class FakeAiClients {
     @Bean
     AiClients.OcrClient ocr() {
