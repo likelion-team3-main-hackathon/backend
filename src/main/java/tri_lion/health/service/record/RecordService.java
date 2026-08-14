@@ -3,14 +3,18 @@ package tri_lion.health.service.record;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.*;
 import java.util.*;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 import tri_lion.health.domain.health.*;
 import tri_lion.health.domain.record.*;
 import tri_lion.health.domain.routine.ExerciseItem;
+import tri_lion.health.dto.request.record.RecordBatchRequest;
 import tri_lion.health.dto.request.record.RecordRequest;
 import tri_lion.health.exception.ApiException;
 import tri_lion.health.external.ai.AiClients;
+import tri_lion.health.external.storage.ObjectStorage;
 import tri_lion.health.repository.health.HealthRepositories;
 import tri_lion.health.repository.record.RecordRepositories;
 import tri_lion.health.repository.routine.RoutineRepositories;
@@ -26,6 +30,7 @@ public class RecordService {
     private final AuthenticatedUser auth;
     private final ObjectMapper json;
     private final AiClients.LlmClient llm;
+    private final ObjectStorage storage;
 
     public RecordService(
             RecordRepositories.Records r,
@@ -35,7 +40,8 @@ public class RecordService {
             HealthRepositories.Jobs j,
             AuthenticatedUser a,
             ObjectMapper o,
-            AiClients.LlmClient l) {
+            AiClients.LlmClient l,
+            ObjectStorage storage) {
         records = r;
         coachings = c;
         items = i;
@@ -44,11 +50,52 @@ public class RecordService {
         auth = a;
         json = o;
         llm = l;
+        this.storage = storage;
     }
 
     @Transactional
     public ActivityRecord create(RecordRequest q) {
         Long uid = auth.active().getId();
+        return createOne(uid, q, true);
+    }
+
+    @Transactional
+    public List<ActivityRecord> createBatch(RecordBatchRequest request) {
+        Long uid = auth.active().getId();
+        List<ActivityRecord> saved = new ArrayList<>();
+        for (RecordRequest record : request.records()) saved.add(createOne(uid, record, false));
+        ActivityRecord trigger = saved.getLast();
+        if ("COMPLETED".equals(trigger.getStatus()))
+            createCoachingJob(
+                    uid,
+                    trigger,
+                    Map.of(
+                            "recordIds", saved.stream().map(ActivityRecord::getId).toList(),
+                            "activityType", trigger.getType(),
+                            "batchSize", saved.size()));
+        return saved;
+    }
+
+    public String uploadImage(MultipartFile image) {
+        Long uid = auth.active().getId();
+        if (image.isEmpty() || image.getSize() > 10 * 1024 * 1024)
+            throw new ApiException(HttpStatus.PAYLOAD_TOO_LARGE, "사진은 10MB 이하만 업로드할 수 있습니다.");
+        String contentType = Optional.ofNullable(image.getContentType()).orElse("").toLowerCase();
+        byte[] bytes;
+        try {
+            bytes = image.getBytes();
+        } catch (java.io.IOException exception) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "사진을 읽을 수 없습니다.");
+        }
+        if (!validImage(contentType, bytes))
+            throw new ApiException(HttpStatus.BAD_REQUEST, "JPG 또는 PNG 사진만 업로드할 수 있습니다.");
+        String extension = contentType.equals("image/png") ? ".png" : ".jpg";
+        String key = "activities/" + uid + "/" + UUID.randomUUID() + extension;
+        storage.put(key, bytes, contentType);
+        return key;
+    }
+
+    private ActivityRecord createOne(Long uid, RecordRequest q, boolean createCoaching) {
         ExerciseItem item = null;
         if (q.routineItemId() != null) {
             item =
@@ -57,10 +104,16 @@ public class RecordService {
                             .orElseThrow(() -> ApiException.notFound("루틴 항목을 찾을 수 없습니다."));
             routines.findByIdAndUserIdAndDeletedAtIsNull(item.getRoutineId(), uid)
                     .orElseThrow(() -> ApiException.notFound("루틴 항목을 찾을 수 없습니다."));
-            if (records.existsByUserIdAndRoutineItemIdAndStatus(
-                    uid, q.routineItemId(), "COMPLETED"))
-                throw ApiException.conflict("이미 완료 기록이 등록된 루틴 항목입니다.");
+            if (!q.type().name().equals(item.getItemType()))
+                throw new ApiException(HttpStatus.BAD_REQUEST, "루틴 항목과 기록 타입이 일치하지 않습니다.");
         }
+        boolean skipped = Boolean.TRUE.equals(q.details().get("skipped"));
+        String status = skipped ? "SKIPPED" : "COMPLETED";
+        if (q.routineItemId() != null
+                && records.existsByUserIdAndRoutineItemIdAndStatus(uid, q.routineItemId(), status))
+            throw ApiException.conflict(skipped ? "이미 패스한 루틴 항목입니다." : "이미 완료 기록이 등록된 루틴 항목입니다.");
+        if (q.imageKey() != null && !q.imageKey().startsWith("activities/" + uid + "/"))
+            throw ApiException.forbidden("다른 사용자의 인증 사진은 사용할 수 없습니다.");
         try {
             var c = q.condition();
             ActivityRecord r =
@@ -71,24 +124,23 @@ public class RecordService {
                                     q.type(),
                                     q.recordedAt().toInstant(),
                                     json.writeValueAsString(q.details()),
+                                    q.imageKey(),
+                                    status,
                                     c == null ? null : c.energyLevel(),
                                     c == null ? null : c.painLevel(),
                                     c == null ? null : c.memo()));
-            if (item != null && Boolean.TRUE.equals(q.details().get("completed"))) item.complete();
-            jobs.save(
-                    new AiJob(
-                            uid,
-                            AiJob.Type.RECORD_COACHING,
-                            json.writeValueAsString(
-                                    Map.of(
-                                            "recordId",
-                                            r.getId(),
-                                            "activityType",
-                                            q.type(),
-                                            "details",
-                                            q.details())),
-                            r.getId(),
-                            "record-" + r.getId()));
+            if (item != null) {
+                if (skipped) item.skip();
+                else item.complete();
+            }
+            if (createCoaching && !skipped && q.type() != ActivityType.OTHER)
+                createCoachingJob(
+                        uid,
+                        r,
+                        Map.of(
+                                "recordId", r.getId(),
+                                "activityType", q.type(),
+                                "details", q.details()));
             return r;
         } catch (ApiException e) {
             throw e;
@@ -97,9 +149,35 @@ public class RecordService {
         }
     }
 
+    private void createCoachingJob(Long uid, ActivityRecord record, Map<String, Object> request) {
+        try {
+            jobs.save(
+                    new AiJob(
+                            uid,
+                            AiJob.Type.RECORD_COACHING,
+                            json.writeValueAsString(request),
+                            record.getId(),
+                            "record-" + record.getId()));
+        } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
+            throw new IllegalArgumentException(exception);
+        }
+    }
+
+    private boolean validImage(String contentType, byte[] bytes) {
+        if (bytes.length < 4) return false;
+        boolean jpg = (bytes[0] & 255) == 0xff && (bytes[1] & 255) == 0xd8;
+        boolean png =
+                (bytes[0] & 255) == 0x89
+                        && bytes[1] == 0x50
+                        && bytes[2] == 0x4e
+                        && bytes[3] == 0x47;
+        return (jpg && List.of("image/jpeg", "image/jpg").contains(contentType))
+                || (png && contentType.equals("image/png"));
+    }
+
     public List<ActivityRecord> list(LocalDate date, ActivityType type) {
         Long uid = auth.active().getId();
-        Instant from = date.atStartOfDay(ZoneOffset.UTC).toInstant();
+        Instant from = date.atStartOfDay(ZoneId.of("Asia/Seoul")).toInstant();
         Instant to = from.plus(1, java.time.temporal.ChronoUnit.DAYS);
         return type == null
                 ? records.findByUserIdAndPerformedAtBetweenOrderByPerformedAtDesc(uid, from, to)

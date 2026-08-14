@@ -12,8 +12,8 @@ public final class RoutineRequests {
             @NotNull Long analysisId,
             @NotNull LocalDate startDate,
             @Min(1) @Max(12) int durationWeeks,
-            @Min(1) @Max(6) int mealCountPerDay,
-            @Min(1) @Max(7) int exerciseDaysPerWeek,
+            @Min(0) @Max(6) int mealCountPerDay,
+            @Min(0) @Max(7) int exerciseDaysPerWeek,
             List<String> preferredExerciseTypes,
             boolean includeExpertContents) {}
 

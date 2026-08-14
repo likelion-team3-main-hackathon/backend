@@ -156,7 +156,7 @@
         {
           "name": "16. 루틴 전체 상세 및 ID 저장",
           "request": { "method": "GET", "url": "{{base_url}}/routines/{{routine_id}}" },
-          "event": [{ "listen": "test", "script": { "exec": ["pm.test('루틴 상세 조회 성공', () => pm.response.to.have.status(200));", "const data = pm.response.json().data;", "const section = data.days[0].sections[0];", "pm.environment.set('section_id', section.sectionId);", "pm.environment.set('exercise_id', section.exercises[0].exerciseId);", "pm.environment.set('exercise_ids_json', JSON.stringify(section.exercises.map(x => x.exerciseId).reverse()));", "pm.test('16개 운동 표현 가능', () => { const count = data.days.flatMap(d => d.sections).flatMap(s => s.exercises).length; pm.expect(count).to.be.at.least(16); });"] } }]
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('루틴 상세 조회 성공', () => pm.response.to.have.status(200));", "const data = pm.response.json().data;", "const section = data.days.flatMap(d => d.sections).find(s => s.exercises.some(x => x.activityType !== 'MEAL'));", "const meal = data.days.flatMap(d => d.sections).flatMap(s => s.exercises).find(x => x.activityType === 'MEAL');", "pm.environment.set('section_id', section.sectionId);", "pm.environment.set('exercise_id', section.exercises[0].exerciseId);", "if (meal) pm.environment.set('meal_item_id', meal.exerciseId);", "pm.environment.set('batch_records_json', JSON.stringify(section.exercises.slice(1, 3).map(x => ({routineItemId:x.exerciseId,type:x.activityType,recordedAt:pm.environment.get('now'),details:{completed:true,exerciseCount:1}}))));", "pm.environment.set('exercise_ids_json', JSON.stringify(section.exercises.map(x => x.exerciseId).reverse()));", "pm.test('운동·식단 혼합 일정 생성', () => { const all = data.days.flatMap(d => d.sections).flatMap(s => s.exercises); pm.expect(all.filter(x => x.activityType !== 'MEAL').length).to.be.at.least(16); pm.expect(all.some(x => x.activityType === 'MEAL')).to.eql(true); });"] } }]
         },
         {
           "name": "17. 루틴 기본 정보 수정",
@@ -222,6 +222,45 @@
             "url": "{{base_url}}/routine-records"
           },
           "event": [{ "listen": "test", "script": { "exec": ["pm.test('기록 등록 성공', () => pm.response.to.have.status(201));", "pm.environment.set('record_id', pm.response.json().data.recordId);"] } }]
+        },
+        {
+          "name": "23-1. 운동 세션 일괄 기록",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"records\": {{batch_records_json}}\n}" },
+            "url": "{{base_url}}/routine-records/batch"
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('운동 세션 일괄 기록 성공', () => pm.response.to.have.status(201));", "pm.expect(pm.response.json().data.count).to.be.above(0);"] } }]
+        },
+        {
+          "name": "23-2. 식단 항목 패스",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"routineItemId\": {{meal_item_id}},\n  \"type\": \"MEAL\",\n  \"recordedAt\": \"{{now}}\",\n  \"details\": {\"completed\": false, \"skipped\": true}\n}" },
+            "url": "{{base_url}}/routine-records"
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('패스 기록 성공', () => pm.response.to.have.status(201));", "pm.expect(pm.response.json().data.recordStatus).to.eql('SKIPPED');"] } }]
+        },
+        {
+          "name": "23-3. 패스했던 식단 완료",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"routineItemId\": {{meal_item_id}},\n  \"type\": \"MEAL\",\n  \"recordedAt\": \"{{now}}\",\n  \"details\": {\"completed\": true, \"calories\": 510}\n}" },
+            "url": "{{base_url}}/routine-records"
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('패스 후 실제 완료 성공', () => pm.response.to.have.status(201));", "pm.expect(pm.response.json().data.recordStatus).to.eql('COMPLETED');"] } }]
+        },
+        {
+          "name": "23-4. 운동·식단 인증 사진 업로드",
+          "request": {
+            "method": "POST",
+            "body": { "mode": "formdata", "formdata": [{ "key": "image", "type": "file", "src": [] }] },
+            "url": "{{base_url}}/routine-records/images"
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('인증 사진 업로드 성공', () => pm.response.to.have.status(201));", "pm.environment.set('activity_image_key', pm.response.json().data.imageKey);"] } }]
         },
         {
           "name": "24. 자유 재활 기록",

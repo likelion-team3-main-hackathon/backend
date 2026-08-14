@@ -111,6 +111,54 @@ public class ExerciseItem {
             String memo,
             boolean exclude,
             Routine.Editor editor) {
+        this(
+                r,
+                s,
+                week,
+                date,
+                estimatedMinutes,
+                sectionType,
+                sectionTitle,
+                sectionOrder,
+                "EXERCISE",
+                n,
+                null,
+                null,
+                o,
+                v,
+                u,
+                sets,
+                rest,
+                video,
+                thumb,
+                memo,
+                exclude,
+                editor);
+    }
+
+    public ExerciseItem(
+            Long r,
+            Long s,
+            int week,
+            LocalDate date,
+            Integer estimatedMinutes,
+            String sectionType,
+            String sectionTitle,
+            int sectionOrder,
+            String itemType,
+            String n,
+            String content,
+            Instant scheduledAt,
+            int o,
+            BigDecimal v,
+            Unit u,
+            int sets,
+            int rest,
+            String video,
+            String thumb,
+            String memo,
+            boolean exclude,
+            Routine.Editor editor) {
         routineId = r;
         sectionId = s;
         this.week = week;
@@ -120,8 +168,10 @@ public class ExerciseItem {
         this.sectionType = sectionType;
         this.sectionTitle = sectionTitle;
         this.sectionOrder = sectionOrder;
-        itemType = "EXERCISE";
+        this.itemType = itemType;
         name = n;
+        this.content = content;
+        this.scheduledAt = scheduledAt;
         sortOrder = o;
         targetValue = v;
         targetUnit = u;
@@ -169,12 +219,17 @@ public class ExerciseItem {
         status = Status.COMPLETED;
     }
 
+    public void skip() {
+        status = Status.SKIPPED;
+    }
+
     public enum Unit {
         SECONDS,
         MINUTES,
         REPETITIONS,
         METERS,
-        KILOMETERS
+        KILOMETERS,
+        KCAL
     }
 
     public enum Status {

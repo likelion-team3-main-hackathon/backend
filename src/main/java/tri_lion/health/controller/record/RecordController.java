@@ -5,8 +5,10 @@ import java.time.LocalDate;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 import tri_lion.health.common.response.ApiResponse;
 import tri_lion.health.domain.record.*;
+import tri_lion.health.dto.request.record.RecordBatchRequest;
 import tri_lion.health.dto.request.record.RecordRequest;
 import tri_lion.health.service.record.RecordService;
 
@@ -26,11 +28,46 @@ public class RecordController {
         data.put("recordId", r.getId());
         data.put("routineItemId", r.getRoutineItemId());
         data.put("activityType", r.getType());
-        data.put("recordStatus", "SAVED");
-        data.put("routineItemStatus", r.getRoutineItemId() == null ? "NOT_LINKED" : "COMPLETED");
-        data.put("coachingStatus", "PROCESSING");
+        data.put("recordStatus", r.getStatus());
+        data.put("routineItemStatus", r.getRoutineItemId() == null ? "NOT_LINKED" : r.getStatus());
+        data.put(
+                "coachingStatus",
+                "COMPLETED".equals(r.getStatus()) && r.getType() != ActivityType.OTHER
+                        ? "PROCESSING"
+                        : "NOT_REQUESTED");
         data.put("createdAt", r.getCreatedAt());
         return ResponseEntity.status(201).body(ApiResponse.success(201, "액티비티 기록 등록 성공", data));
+    }
+
+    @PostMapping("/routine-records/batch")
+    ResponseEntity<ApiResponse<Object>> createBatch(
+            @Valid @RequestBody RecordBatchRequest request) {
+        var saved = service.createBatch(request);
+        return ResponseEntity.status(201)
+                .body(
+                        ApiResponse.success(
+                                201,
+                                "액티비티 기록 일괄 등록 성공",
+                                java.util.Map.of(
+                                        "recordIds",
+                                        saved.stream().map(ActivityRecord::getId).toList(),
+                                        "routineItemIds",
+                                        saved.stream()
+                                                .map(ActivityRecord::getRoutineItemId)
+                                                .filter(java.util.Objects::nonNull)
+                                                .toList(),
+                                        "count",
+                                        saved.size())));
+    }
+
+    @PostMapping(value = "/routine-records/images", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    ResponseEntity<ApiResponse<Object>> uploadImage(@RequestPart("image") MultipartFile image) {
+        return ResponseEntity.status(201)
+                .body(
+                        ApiResponse.success(
+                                201,
+                                "액티비티 인증 사진 업로드 성공",
+                                java.util.Map.of("imageKey", service.uploadImage(image))));
     }
 
     @GetMapping("/routine-records")

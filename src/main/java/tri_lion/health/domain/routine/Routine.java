@@ -61,10 +61,15 @@ public class Routine {
     private Instant deletedAt;
 
     public Routine(Long u, String title, LocalDate start, int weeks, Long previous) {
+        this(u, title, start, weeks, previous, Type.EXERCISE);
+    }
+
+    public Routine(
+            Long u, String title, LocalDate start, int weeks, Long previous, Type routineType) {
         userId = u;
         this.title = title;
         description = "개인 제약을 반영한 맞춤 웰니스 루틴입니다.";
-        type = Type.EXERCISE;
+        type = routineType;
         source = Source.AI_GENERATED;
         startDate = start;
         endDate = start.plusWeeks(weeks).minusDays(1);

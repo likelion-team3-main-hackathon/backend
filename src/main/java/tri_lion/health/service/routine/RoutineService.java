@@ -43,6 +43,8 @@ public class RoutineService {
     @Transactional
     public AiJob request(RoutineRequests.GenerationRequest req, String key) {
         Long uid = auth.sensitive().getId();
+        if (req.mealCountPerDay() == 0 && req.exerciseDaysPerWeek() == 0)
+            throw new ApiException(HttpStatus.BAD_REQUEST, "식단 또는 운동 일정 중 하나 이상을 선택해야 합니다.");
         Analysis a =
                 analyses.findByIdAndUserId(req.analysisId(), uid)
                         .filter(x -> x.getStatus() == Analysis.Status.COMPLETED)
@@ -76,78 +78,54 @@ public class RoutineService {
             JsonNode n = json.readTree(job.getRequestJson());
             LocalDate start = LocalDate.parse(n.get("startDate").asText());
             int weeks = n.get("durationWeeks").asInt();
+            int mealCount = Math.max(0, n.path("mealCountPerDay").asInt(3));
+            int exerciseDays = Math.max(0, n.path("exerciseDaysPerWeek").asInt(3));
+            String movementType = preferredMovementType(n.path("preferredExerciseTypes"));
             Long previous =
                     n.hasNonNull("previousRoutineId") ? n.get("previousRoutineId").asLong() : null;
+            Routine.Type routineType =
+                    mealCount > 0 && exerciseDays > 0
+                            ? Routine.Type.MIXED
+                            : mealCount > 0 ? Routine.Type.MEAL : Routine.Type.EXERCISE;
+            String title =
+                    previous != null
+                            ? "재조정 맞춤 루틴"
+                            : routineType == Routine.Type.MIXED
+                                    ? "맞춤 웰니스 종합 루틴"
+                                    : routineType == Routine.Type.MEAL ? "맞춤 식단 루틴" : "맞춤 운동 루틴";
             Routine r =
                     routines.save(
                             new Routine(
-                                    job.getUserId(),
-                                    previous == null ? "맞춤 4주 웰니스 루틴" : "재조정 맞춤 루틴",
-                                    start,
-                                    weeks,
-                                    previous));
-            long mainSectionId = r.getId() * 1000 + 11;
-            long coolSectionId = r.getId() * 1000 + 12;
-            String[][] ex = {
-                {"점핑잭", "20", "SECONDS"},
-                {"복부 크런치", "15", "REPETITIONS"},
-                {"크로스오버 크런치", "16", "REPETITIONS"},
-                {"러시안 트위스트", "20", "REPETITIONS"},
-                {"마운틴 클라이머", "26", "REPETITIONS"},
-                {"다리 들어올리기", "12", "REPETITIONS"},
-                {"플랭크", "30", "SECONDS"},
-                {"비스듬한 사선 트위스트", "16", "REPETITIONS"},
-                {"크로스 암 크런치", "15", "REPETITIONS"},
-                {"죽은 곤충 자세", "20", "REPETITIONS"},
-                {"마운틴 클라이머", "26", "REPETITIONS"},
-                {"레그 스프레드", "10", "REPETITIONS"},
-                {"플랭크", "30", "SECONDS"},
-                {"고양이 소 포즈", "30", "SECONDS"},
-                {"코브라 스트레칭", "30", "SECONDS"},
-                {"어린이 포즈", "30", "SECONDS"}
-            };
-            for (int x = 0; x < ex.length; x++) {
-                boolean mainSection = x < 11;
-                items.save(
-                        new ExerciseItem(
-                                r.getId(),
-                                mainSection ? mainSectionId : coolSectionId,
-                                1,
-                                start,
-                                18,
-                                mainSection ? "MAIN_EXERCISE" : "COOL_DOWN",
-                                mainSection ? "본 운동" : "마무리 스트레칭",
-                                mainSection ? 1 : 2,
-                                ex[x][0],
-                                x < 11 ? x + 1 : x - 10,
-                                new BigDecimal(ex[x][1]),
-                                ExerciseItem.Unit.valueOf(ex[x][2]),
-                                1,
-                                x == 10 ? 30 : (x < 11 ? 10 : 5),
-                                "https://cdn.example.com/exercises/" + (x + 1) + ".mp4",
-                                null,
-                                null,
-                                false,
-                                Routine.Editor.AI));
+                                    job.getUserId(), title, start, weeks, previous, routineType));
+            int totalDays = weeks * 7;
+            for (int dayIndex = 0; dayIndex < totalDays; dayIndex++) {
+                LocalDate date = start.plusDays(dayIndex);
+                int week = dayIndex / 7 + 1;
+                if (mealCount > 0) saveMealDay(r, date, week, dayIndex, mealCount);
+                if (dayIndex % 7 < exerciseDays)
+                    saveExerciseDay(r, date, week, dayIndex, movementType);
             }
             if (previous != null) {
-                int order = 12;
                 for (ExerciseItem protectedItem :
                         items.findByRoutineIdAndDeletedAtIsNullOrderBySortOrder(previous).stream()
                                 .filter(ExerciseItem::isExcludeFromAiAdjustment)
                                 .toList()) {
+                    long sectionId = r.getId() * 1_000_000 + 90;
                     items.save(
                             new ExerciseItem(
                                     r.getId(),
-                                    mainSectionId,
-                                    protectedItem.getWeek(),
+                                    sectionId,
+                                    1,
                                     start,
                                     protectedItem.getEstimatedMinutes(),
-                                    protectedItem.getSectionType(),
-                                    protectedItem.getSectionTitle(),
-                                    protectedItem.getSectionOrder(),
+                                    "USER_PROTECTED",
+                                    "사용자 고정 항목",
+                                    90,
+                                    protectedItem.getItemType(),
                                     protectedItem.getName(),
-                                    order++,
+                                    protectedItem.getContent(),
+                                    protectedItem.getScheduledAt(),
+                                    protectedItem.getSortOrder(),
                                     protectedItem.getTargetValue(),
                                     protectedItem.getTargetUnit(),
                                     protectedItem.getSets(),
@@ -163,6 +141,129 @@ public class RoutineService {
             return r.getId();
         } catch (Exception e) {
             throw new IllegalStateException(e);
+        }
+    }
+
+    private String preferredMovementType(JsonNode preferredTypes) {
+        if (preferredTypes.isArray()) {
+            for (JsonNode type : preferredTypes)
+                if ("REHABILITATION".equals(type.asText())) return "REHABILITATION";
+        }
+        return "EXERCISE";
+    }
+
+    private void saveExerciseDay(
+            Routine routine, LocalDate date, int week, int dayIndex, String movementType) {
+        String[][] exercises = {
+            {"점핑잭", "20", "SECONDS"},
+            {"복부 크런치", "15", "REPETITIONS"},
+            {"크로스오버 크런치", "16", "REPETITIONS"},
+            {"러시안 트위스트", "20", "REPETITIONS"},
+            {"마운틴 클라이머", "26", "REPETITIONS"},
+            {"다리 들어올리기", "12", "REPETITIONS"},
+            {"플랭크", "30", "SECONDS"},
+            {"비스듬한 사선 트위스트", "16", "REPETITIONS"},
+            {"크로스 암 크런치", "15", "REPETITIONS"},
+            {"죽은 곤충 자세", "20", "REPETITIONS"},
+            {"마운틴 클라이머", "26", "REPETITIONS"},
+            {"레그 스프레드", "10", "REPETITIONS"},
+            {"플랭크", "30", "SECONDS"},
+            {"고양이 소 포즈", "30", "SECONDS"},
+            {"코브라 스트레칭", "30", "SECONDS"},
+            {"어린이 포즈", "30", "SECONDS"}
+        };
+        long sectionBase = routine.getId() * 1_000_000 + (long) dayIndex * 100;
+        Instant scheduledAt = date.atTime(18, 0).atZone(ZoneId.of("Asia/Seoul")).toInstant();
+        for (int index = 0; index < exercises.length; index++) {
+            boolean main = index < 11;
+            items.save(
+                    new ExerciseItem(
+                            routine.getId(),
+                            sectionBase + (main ? 10 : 11),
+                            week,
+                            date,
+                            18,
+                            main ? "MAIN_EXERCISE" : "COOL_DOWN",
+                            main
+                                    ? ("REHABILITATION".equals(movementType) ? "재활 운동" : "본 운동")
+                                    : "마무리 스트레칭",
+                            main ? 10 : 11,
+                            movementType,
+                            exercises[index][0],
+                            null,
+                            scheduledAt,
+                            main ? index + 1 : index - 10,
+                            new BigDecimal(exercises[index][1]),
+                            ExerciseItem.Unit.valueOf(exercises[index][2]),
+                            1,
+                            index == 10 ? 30 : (main ? 10 : 5),
+                            "https://cdn.example.com/exercises/" + (index + 1) + ".mp4",
+                            null,
+                            null,
+                            false,
+                            Routine.Editor.AI));
+        }
+    }
+
+    private void saveMealDay(Routine routine, LocalDate date, int week, int dayIndex, int mealCount)
+            throws com.fasterxml.jackson.core.JsonProcessingException {
+        String[][] meals = {
+            {"BREAKFAST", "아침", "그릭요거트볼", "420", "38", "26", "12", "7"},
+            {"LUNCH", "점심", "현미밥과 닭가슴살", "610", "82", "41", "18", "12"},
+            {"DINNER", "저녁", "연어구이와 샐러드", "510", "32", "41", "18", "18"},
+            {"SNACK", "간식", "견과류와 과일", "220", "25", "8", "10", "15"},
+            {"SNACK", "간식", "단백질 요거트", "180", "18", "20", "4", "20"},
+            {"SNACK", "간식", "바나나", "110", "28", "1", "0", "21"}
+        };
+        long sectionBase = routine.getId() * 1_000_000 + (long) dayIndex * 100;
+        for (int index = 0; index < Math.min(mealCount, meals.length); index++) {
+            String[] meal = meals[index];
+            Map<String, Object> details =
+                    Map.of(
+                            "mealType", meal[0],
+                            "foods",
+                                    List.of(
+                                            Map.of(
+                                                    "name",
+                                                    meal[2],
+                                                    "calories",
+                                                    Integer.parseInt(meal[3]),
+                                                    "carbs",
+                                                    Integer.parseInt(meal[4]),
+                                                    "protein",
+                                                    Integer.parseInt(meal[5]),
+                                                    "fat",
+                                                    Integer.parseInt(meal[6]))),
+                            "calories", Integer.parseInt(meal[3]),
+                            "carbohydrateGrams", Integer.parseInt(meal[4]),
+                            "proteinGrams", Integer.parseInt(meal[5]),
+                            "fatGrams", Integer.parseInt(meal[6]));
+            items.save(
+                    new ExerciseItem(
+                            routine.getId(),
+                            sectionBase + index + 1,
+                            week,
+                            date,
+                            15,
+                            meal[0],
+                            meal[1] + " 식단",
+                            index + 1,
+                            "MEAL",
+                            meal[2],
+                            json.writeValueAsString(details),
+                            date.atTime(Integer.parseInt(meal[7]), 0)
+                                    .atZone(ZoneId.of("Asia/Seoul"))
+                                    .toInstant(),
+                            1,
+                            new BigDecimal(meal[3]),
+                            ExerciseItem.Unit.KCAL,
+                            1,
+                            0,
+                            null,
+                            null,
+                            null,
+                            false,
+                            Routine.Editor.AI));
         }
     }
 
@@ -232,7 +333,8 @@ public class RoutineService {
                         .orElseThrow(() -> ApiException.notFound("루틴 구간을 찾을 수 없습니다."));
         validateUrl(q.videoUrl());
         List<ExerciseItem> existing =
-                items.findBySectionIdAndDeletedAtIsNullOrderBySortOrder(sectionId);
+                items.findByRoutineIdAndSectionIdAndDeletedAtIsNullOrderBySortOrder(
+                        routineId, sectionId);
         int order = Math.min(q.order(), existing.size() + 1);
         existing.stream()
                 .filter(x -> x.getSortOrder() >= order)
@@ -292,7 +394,8 @@ public class RoutineService {
     @Transactional
     public List<Long> order(Long r, Long s, List<Long> ids) {
         owned(r);
-        List<ExerciseItem> current = items.findBySectionIdAndDeletedAtIsNullOrderBySortOrder(s);
+        List<ExerciseItem> current =
+                items.findByRoutineIdAndSectionIdAndDeletedAtIsNullOrderBySortOrder(r, s);
         Set<Long> expected =
                 current.stream()
                         .map(ExerciseItem::getId)
@@ -319,6 +422,12 @@ public class RoutineService {
                                     LocalDate.now(),
                                     "durationWeeks",
                                     4,
+                                    "mealCountPerDay",
+                                    old.getType() == Routine.Type.EXERCISE ? 0 : 3,
+                                    "exerciseDaysPerWeek",
+                                    old.getType() == Routine.Type.MEAL ? 0 : 3,
+                                    "preferredExerciseTypes",
+                                    List.of("WALKING"),
                                     "previousRoutineId",
                                     routineId,
                                     "reason",

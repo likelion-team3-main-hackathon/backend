@@ -10,6 +10,7 @@ public record RecordRequest(
         @NotNull ActivityType type,
         @NotNull OffsetDateTime recordedAt,
         @NotNull Map<String, Object> details,
+        String imageKey,
         Condition condition) {
     public record Condition(
             @Min(1) @Max(5) Integer energyLevel, @Min(0) @Max(5) Integer painLevel, String memo) {}

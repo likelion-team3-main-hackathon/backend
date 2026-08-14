@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.*;
 import jakarta.servlet.http.Cookie;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -144,13 +145,29 @@ class CoreFlowIntegrationTests {
                                 get("/api/v1/routines/{id}", routineId)
                                         .header("Authorization", "Bearer " + access))
                         .andExpect(status().isOk())
-                        .andExpect(
-                                jsonPath("$.data.days[0].sections[0].exercises.length()").value(11))
                         .andReturn();
-        long exerciseId =
-                json.readTree(detail.getResponse().getContentAsString())
-                        .at("/data/days/0/sections/0/exercises/0/exerciseId")
-                        .asLong();
+        JsonNode routineDetail =
+                json.readTree(detail.getResponse().getContentAsString()).at("/data");
+        assertThat(routineDetail.path("days").size()).isEqualTo(28);
+        JsonNode firstExercise = null;
+        JsonNode firstMeal = null;
+        var exerciseIds = new ArrayList<Long>();
+        for (JsonNode day : routineDetail.path("days")) {
+            for (JsonNode section : day.path("sections")) {
+                for (JsonNode item : section.path("exercises")) {
+                    if ("MEAL".equals(item.path("activityType").asText()) && firstMeal == null)
+                        firstMeal = item;
+                    if ("EXERCISE".equals(item.path("activityType").asText())
+                            && firstExercise == null) firstExercise = item;
+                    if ("EXERCISE".equals(item.path("activityType").asText())
+                            && exerciseIds.size() < 3)
+                        exerciseIds.add(item.path("exerciseId").asLong());
+                }
+            }
+        }
+        assertThat(firstMeal).isNotNull();
+        assertThat(firstExercise).isNotNull();
+        long exerciseId = firstExercise.path("exerciseId").asLong();
         mvc.perform(
                         patch("/api/v1/routines/{id}/exercises/{exercise}", routineId, exerciseId)
                                 .header("Authorization", "Bearer " + access)
@@ -168,6 +185,51 @@ class CoreFlowIntegrationTests {
                                                 + exerciseId
                                                 + ",\"type\":\"EXERCISE\",\"recordedAt\":\"2026-08-11T10:00:00+09:00\",\"details\":{\"completed\":true},\"condition\":{\"energyLevel\":4,\"painLevel\":1}}"))
                 .andExpect(status().isCreated());
+        long mealId = firstMeal.path("exerciseId").asLong();
+        mvc.perform(
+                        post("/api/v1/routine-records")
+                                .header("Authorization", "Bearer " + access)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        "{\"routineItemId\":"
+                                                + mealId
+                                                + ",\"type\":\"MEAL\",\"recordedAt\":\"2026-08-11T09:00:00+09:00\",\"details\":{\"completed\":false,\"skipped\":true}}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.recordStatus").value("SKIPPED"));
+        mvc.perform(
+                        post("/api/v1/routine-records")
+                                .header("Authorization", "Bearer " + access)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        "{\"routineItemId\":"
+                                                + mealId
+                                                + ",\"type\":\"MEAL\",\"recordedAt\":\"2026-08-11T12:00:00+09:00\",\"details\":{\"completed\":true,\"calories\":510}}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.recordStatus").value("COMPLETED"));
+        mvc.perform(
+                        post("/api/v1/routine-records/batch")
+                                .header("Authorization", "Bearer " + access)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        "{\"records\":[{\"routineItemId\":"
+                                                + exerciseIds.get(1)
+                                                + ",\"type\":\"EXERCISE\",\"recordedAt\":\"2026-08-11T10:10:00+09:00\",\"details\":{\"completed\":true,\"exerciseCount\":1}},{\"routineItemId\":"
+                                                + exerciseIds.get(2)
+                                                + ",\"type\":\"EXERCISE\",\"recordedAt\":\"2026-08-11T10:10:00+09:00\",\"details\":{\"completed\":true,\"exerciseCount\":1}}]}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.count").value(2));
+        MockMultipartFile activityImage =
+                new MockMultipartFile(
+                        "image",
+                        "exercise.jpg",
+                        "image/jpeg",
+                        new byte[] {(byte) 0xff, (byte) 0xd8, (byte) 0xff, (byte) 0xe0});
+        mvc.perform(
+                        multipart("/api/v1/routine-records/images")
+                                .file(activityImage)
+                                .header("Authorization", "Bearer " + access))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.imageKey").exists());
         worker.work();
         mvc.perform(get("/api/v1/coachings/latest").header("Authorization", "Bearer " + access))
                 .andExpect(status().isOk())

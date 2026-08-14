@@ -26,7 +26,8 @@ public final class RoutineRepositories {
                 findByRoutineIdAndDeletedAtIsNullOrderByScheduledDateAscSectionOrderAscSortOrderAsc(
                         Long r);
 
-        List<ExerciseItem> findBySectionIdAndDeletedAtIsNullOrderBySortOrder(Long s);
+        List<ExerciseItem> findByRoutineIdAndSectionIdAndDeletedAtIsNullOrderBySortOrder(
+                Long routineId, Long sectionId);
 
         Optional<ExerciseItem> findFirstByRoutineIdAndSectionIdAndDeletedAtIsNull(
                 Long routineId, Long sectionId);

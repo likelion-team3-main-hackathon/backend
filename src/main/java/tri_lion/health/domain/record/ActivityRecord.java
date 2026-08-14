@@ -60,6 +60,8 @@ public class ActivityRecord {
             ActivityType type,
             Instant at,
             String details,
+            String imageKey,
+            String status,
             Integer energy,
             Integer pain,
             String memo) {
@@ -68,10 +70,11 @@ public class ActivityRecord {
         this.type = type;
         performedAt = at;
         this.details = details;
+        this.imageKey = imageKey;
         energyLevel = energy;
         painLevel = pain;
         conditionMemo = memo;
-        status = "COMPLETED";
+        this.status = status;
         createdAt = Instant.now();
     }
 }

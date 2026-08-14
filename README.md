@@ -23,8 +23,8 @@
 - JPG/PNG/PDF 확장자·MIME·파일 시그니처·10MB 제한 검증 및 임의 Object Key 저장
 - DB 기반 비동기 AI 작업, 최대 3회 지수 백오프, 사용자·작업 유형·멱등성 키 중복 방지
 - 분석 이력 및 최신/단건 결과 재조회
-- 16개 운동 예시를 포함한 루틴 생성, 날짜·논리 구간별 그룹 조회, 사용자 편집 표시, 수정 보호, 순서 무결성 검증, 낙관적 락
-- 운동 완료 중복 차단, 수행 기록 보존, 별도 코칭 작업 생성
+- 전체 기간의 날짜별 운동·재활·식단 루틴 생성, 논리 구간별 그룹 조회, 사용자 편집 표시, 수정 보호, 순서 무결성 검증, 낙관적 락
+- 운동 세션 항목 일괄 완료, 패스 후 재수행, 수행 기록·인증 사진 키 보존, 별도 코칭 작업 생성
 - 운동·재활·식단·체중·컨디션·기타 타입별 액티비티 자유 기록과 타입 필터 조회
 - 한 전문가 커리큘럼에 운동·재활·식단 항목을 함께 담는 `MIXED` 커리큘럼
 - 공통 응답/오류, Bean Validation, Request ID, Swagger UI, Actuator liveness/readiness
@@ -119,7 +119,7 @@ Fake OCR/LLM은 네트워크 없이 결정적인 분석·루틴·코칭 결과�
 
 Postman 우측 상단 Environment에서 `Tri Lion Health - Local`을 선택한 뒤 컬렉션 요청을 번호 순서대로 실행합니다. 로그인 응답에서 Access Token을 저장하고 이후 문서·분석·루틴·운동·기록 ID도 테스트 스크립트가 자동 저장합니다.
 
-`6. 건강 문서 업로드`에서 파일이 자동 선택되지 않으면 프로젝트의 `postman/fixtures/sample-health.pdf`를 한 번 직접 선택합니다. Collection Runner로 전체 실행할 때는 비동기 Worker 처리를 위해 요청 간 Delay를 `1000ms`로 설정합니다. 분석 또는 루틴 상태가 아직 `PENDING/PROCESSING`이면 해당 상태 조회 요청을 1초 뒤 다시 실행합니다.
+`6. 건강 문서 업로드`에서 파일이 자동 선택되지 않으면 프로젝트의 `postman/fixtures/sample-health.pdf`를 한 번 직접 선택합니다. `23-4. 운동·식단 인증 사진 업로드`는 JPG 또는 PNG 파일을 직접 선택합니다. Collection Runner로 전체 실행할 때 해당 사진 요청을 제외하거나 파일을 먼저 지정하고, 비동기 Worker 처리를 위해 요청 간 Delay를 `1000ms`로 설정합니다. 분석 또는 루틴 상태가 아직 `PENDING/PROCESSING`이면 해당 상태 조회 요청을 1초 뒤 다시 실행합니다.
 
 로컬 HTTP 테스트에서는 Postman Cookie Jar가 Refresh Token을 전송할 수 있도록 `local` 프로필에 한해 `Secure=false`를 사용합니다. 다른 프로필의 기본값은 `Secure=true`입니다.
 
@@ -148,7 +148,7 @@ docker compose --env-file .env.example config --quiet
 - 약관 전 건강 API 차단
 - 로그인 → 약관 → 온보딩 → 문서 → 분석 → 루틴 → 편집 → 기록 → 코칭 통합 흐름
 - Flyway 초기 Migration과 JPA 모델 스키마 검증(H2 MySQL 호환 모드)
-- 운동·재활·식단 기록 생성 및 타입 필터, 잘못된 타입 거부
+- 운동·재활·식단 기록 생성, 세션 일괄 저장, 패스 후 완료, 사진 업로드, 타입 필터와 잘못된 타입 거부
 - 운동·식단 혼합 전문가 커리큘럼 생성과 단일 타입 불일치 거부
 
 ## 환경 변수

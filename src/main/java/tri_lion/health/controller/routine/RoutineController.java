@@ -247,8 +247,12 @@ public class RoutineController {
     private Map<String, Object> exercise(ExerciseItem i) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("exerciseId", i.getId());
+        m.put("activityType", i.getItemType());
         m.put("order", i.getSortOrder());
         m.put("name", i.getName());
+        m.put("content", i.getContent());
+        m.put("scheduledAt", i.getScheduledAt());
+        m.put("estimatedMinutes", i.getEstimatedMinutes());
         m.put("targetValue", i.getTargetValue());
         m.put("targetUnit", i.getTargetUnit());
         m.put("sets", i.getSets());
