@@ -81,16 +81,26 @@ public class AiJob {
     }
 
     public void complete() {
+        complete(null, null);
+    }
+
+    public void complete(String model, String prompt) {
         status = Status.COMPLETED;
         progress = 100;
+        if (model != null) modelVersion = model;
+        if (prompt != null) promptVersion = prompt;
         updatedAt = Instant.now();
     }
 
     public void retry(String reason) {
+        retry(reason, 1L << (retryCount + 1));
+    }
+
+    public void retry(String reason, long delaySeconds) {
         retryCount++;
         failureReason = reason;
         status = retryCount >= 3 ? Status.FAILED : Status.RETRYING;
-        nextAttemptAt = Instant.now().plusSeconds(1L << retryCount);
+        nextAttemptAt = Instant.now().plusSeconds(Math.max(1, delaySeconds));
         updatedAt = Instant.now();
     }
 

@@ -51,6 +51,7 @@ class CoreFlowIntegrationTests {
                         .andReturn();
         JsonNode body = json.readTree(login.getResponse().getContentAsString());
         String access = body.at("/data/accessToken").asText();
+        long userId = body.at("/data/userId").asLong();
         Cookie refresh = login.getResponse().getCookie("refresh_token");
         assertThat(refresh).isNotNull();
         assertThat(refresh.isHttpOnly()).isTrue();
@@ -104,6 +105,20 @@ class CoreFlowIntegrationTests {
                 json.readTree(analysis.getResponse().getContentAsString())
                         .at("/data/analysisId")
                         .asLong();
+        mvc.perform(
+                        post("/api/v1/health-analyses")
+                                .header("Authorization", "Bearer " + access)
+                                .header("Idempotency-Key", "analysis-1")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"documentIds\":[" + documentId + "]}"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.data.analysisId").value(analysisId));
+        assertThat(
+                        db.queryForObject(
+                                "select count(*) from ai_jobs where user_id=? and job_type='HEALTH_ANALYSIS' and idempotency_key='analysis-1'",
+                                Integer.class,
+                                userId))
+                .isEqualTo(1);
         worker.work();
         mvc.perform(
                         get("/api/v1/health-analyses/{id}", analysisId)
@@ -121,7 +136,7 @@ class CoreFlowIntegrationTests {
                                                         + analysisId
                                                         + ",\"startDate\":\""
                                                         + java.time.LocalDate.now()
-                                                        + "\",\"durationWeeks\":4,\"mealCountPerDay\":3,\"exerciseDaysPerWeek\":3,\"preferredExerciseTypes\":[\"WALKING\"],\"includeExpertContents\":false}"))
+                                                        + "\",\"durationWeeks\":3,\"mealCountPerDay\":3,\"exerciseDaysPerWeek\":3,\"preferredExerciseTypes\":[\"WALKING\"],\"includeExpertContents\":false,\"selectedRecommendationIds\":[\"MEAL_PRIMARY\",\"EXERCISE_PRIMARY\"]}"))
                         .andExpect(status().isAccepted())
                         .andReturn();
         long generationId =
@@ -148,7 +163,7 @@ class CoreFlowIntegrationTests {
                         .andReturn();
         JsonNode routineDetail =
                 json.readTree(detail.getResponse().getContentAsString()).at("/data");
-        assertThat(routineDetail.path("days").size()).isEqualTo(28);
+        assertThat(routineDetail.path("days").size()).isEqualTo(21);
         JsonNode firstExercise = null;
         JsonNode firstMeal = null;
         var exerciseIds = new ArrayList<Long>();
@@ -265,7 +280,6 @@ class CoreFlowIntegrationTests {
                                         "{\"type\":\"YOGA\",\"recordedAt\":\"2026-08-11T13:00:00+09:00\",\"details\":{}}"))
                 .andExpect(status().isBadRequest());
 
-        long userId = body.at("/data/userId").asLong();
         db.update(
                 "insert into experts(user_id,specialty,qualification_info,verification_status,applied_at) values(?,?,?,?,CURRENT_TIMESTAMP)",
                 userId,

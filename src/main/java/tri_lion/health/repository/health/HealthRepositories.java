@@ -1,5 +1,6 @@
 package tri_lion.health.repository.health;
 
+import jakarta.persistence.LockModeType;
 import java.time.Instant;
 import java.util.*;
 import org.springframework.data.domain.*;
@@ -31,11 +32,16 @@ public final class HealthRepositories {
 
     public interface Jobs extends JpaRepository<AiJob, Long> {
         @Query(
-                "select j from AiJob j where j.status in ('PENDING','RETRYING') and (j.nextAttemptAt is null or j.nextAttemptAt<=:now) order by j.createdAt")
-        List<AiJob> claimable(@Param("now") Instant now, Pageable p);
+                "select j from AiJob j where (j.status in ('PENDING','RETRYING') and (j.nextAttemptAt is null or j.nextAttemptAt<=:now)) or (j.status='PROCESSING' and j.updatedAt<=:staleBefore) order by j.createdAt")
+        List<AiJob> claimable(
+                @Param("now") Instant now, @Param("staleBefore") Instant staleBefore, Pageable p);
 
         Optional<AiJob> findByUserIdAndTypeAndIdempotencyKey(Long u, AiJob.Type t, String key);
 
         Optional<AiJob> findByIdAndUserId(Long id, Long user);
+
+        @Lock(LockModeType.PESSIMISTIC_WRITE)
+        @Query("select j from AiJob j where j.id=:id")
+        Optional<AiJob> findForUpdateById(@Param("id") Long id);
     }
 }

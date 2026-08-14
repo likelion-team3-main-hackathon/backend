@@ -63,6 +63,18 @@ public class HealthDocument {
         processingStatus = Status.DELETED;
     }
 
+    public void processing() {
+        processingStatus = Status.PROCESSING;
+    }
+
+    public void processed() {
+        processingStatus = Status.PROCESSED;
+    }
+
+    public void fail() {
+        processingStatus = Status.FAILED;
+    }
+
     public enum Type {
         MEDICAL_RECORD,
         PRESCRIPTION,

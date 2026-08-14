@@ -66,9 +66,20 @@ public class Routine {
 
     public Routine(
             Long u, String title, LocalDate start, int weeks, Long previous, Type routineType) {
+        this(u, title, "개인 제약을 반영한 맞춤 웰니스 루틴입니다.", start, weeks, previous, routineType);
+    }
+
+    public Routine(
+            Long u,
+            String title,
+            String description,
+            LocalDate start,
+            int weeks,
+            Long previous,
+            Type routineType) {
         userId = u;
         this.title = title;
-        description = "개인 제약을 반영한 맞춤 웰니스 루틴입니다.";
+        this.description = description;
         type = routineType;
         source = Source.AI_GENERATED;
         startDate = start;
