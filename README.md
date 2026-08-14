@@ -6,7 +6,7 @@
 
 ### 명세서 대비 구현 현황 체크리스트
 
-- [x] **DB / Model:** 기존 9개 테이블과 인증·약관·온보딩·건강 문서·AI 작업·루틴 계층·코칭·이용 테이블을 구성한 Flyway `V1`, 타입별 액티비티와 혼합 커리큘럼을 추가한 `V2` 구현
+- [x] **DB / Model:** Flyway `V1`·`V2` 구축, `V3`에서 23개 테이블을 17개로 단순화하고 `V4`에서 기존 AAC 문서 타입을 MCC로 이전
 - [x] **API Endpoints — 인증/사용자:** Google OIDC 로그인, Refresh Token Rotation, 로그아웃, 약관, 온보딩, 내 프로필
 - [x] **API Endpoints — 건강/분석:** 문서 업로드·목록·삭제, 분석 생성·이력·최신·단건 조회
 - [x] **API Endpoints — 루틴/기록:** 생성 상태, 오늘/전체/상세, 루틴 수정, 운동 추가·수정·삭제·순서 변경, 재조정, 기록, 최신 코칭
@@ -23,7 +23,7 @@
 - JPG/PNG/PDF 확장자·MIME·파일 시그니처·10MB 제한 검증 및 임의 Object Key 저장
 - DB 기반 비동기 AI 작업, 최대 3회 지수 백오프, 사용자·작업 유형·멱등성 키 중복 방지
 - 분석 이력 및 최신/단건 결과 재조회
-- 16개 운동 예시를 포함한 루틴 생성, 전체 계층 조회, 사용자 편집 표시, 수정 보호, 순서 무결성 검증, 낙관적 락
+- 16개 운동 예시를 포함한 루틴 생성, 날짜·논리 구간별 그룹 조회, 사용자 편집 표시, 수정 보호, 순서 무결성 검증, 낙관적 락
 - 운동 완료 중복 차단, 수행 기록 보존, 별도 코칭 작업 생성
 - 운동·재활·식단·체중·컨디션·기타 타입별 액티비티 자유 기록과 타입 필터 조회
 - 한 전문가 커리큘럼에 운동·재활·식단 항목을 함께 담는 `MIXED` 커리큘럼
@@ -127,7 +127,7 @@ Postman 우측 상단 Environment에서 `Tri Lion Health - Local`을 선택한 �
 
 ```bash
 docker compose exec mysql mysql \
-  -uaac_user -paac_password aac_wellness \
+  -umcc_user -pmcc_password mcc_wellness \
   -e "UPDATE experts SET verification_status='APPROVED' ORDER BY applied_at DESC LIMIT 1;"
 ```
 

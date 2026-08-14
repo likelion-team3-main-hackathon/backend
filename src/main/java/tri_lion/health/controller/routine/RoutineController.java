@@ -208,31 +208,28 @@ public class RoutineController {
                                 x ->
                                         Map.of(
                                                 "routineDayId",
-                                                x.day().getId(),
+                                                x.routineDayId(),
                                                 "dayOfWeek",
-                                                x.day().getDayOfWeek(),
+                                                x.dayOfWeek(),
                                                 "week",
-                                                x.day().getWeek(),
+                                                x.week(),
                                                 "scheduledDate",
-                                                x.day().getScheduledDate(),
+                                                x.scheduledDate(),
                                                 "estimatedMinutes",
-                                                x.day().getEstimatedMinutes(),
+                                                x.estimatedMinutes(),
                                                 "sections",
                                                 x.sections().stream()
                                                         .map(
                                                                 s ->
                                                                         Map.of(
                                                                                 "sectionId",
-                                                                                s.section().getId(),
+                                                                                s.sectionId(),
                                                                                 "sectionType",
-                                                                                s.section()
-                                                                                        .getType(),
+                                                                                s.sectionType(),
                                                                                 "title",
-                                                                                s.section()
-                                                                                        .getTitle(),
+                                                                                s.title(),
                                                                                 "order",
-                                                                                s.section()
-                                                                                        .getSortOrder(),
+                                                                                s.order(),
                                                                                 "exercises",
                                                                                 s
                                                                                         .exercises()

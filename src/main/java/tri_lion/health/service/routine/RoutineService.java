@@ -19,8 +19,6 @@ import tri_lion.health.security.AuthenticatedUser;
 @Service
 public class RoutineService {
     private final RoutineRepositories.Routines routines;
-    private final RoutineRepositories.Days days;
-    private final RoutineRepositories.Sections sections;
     private final RoutineRepositories.Items items;
     private final HealthRepositories.Analyses analyses;
     private final HealthRepositories.Jobs jobs;
@@ -29,16 +27,12 @@ public class RoutineService {
 
     public RoutineService(
             RoutineRepositories.Routines r,
-            RoutineRepositories.Days d,
-            RoutineRepositories.Sections s,
             RoutineRepositories.Items i,
             HealthRepositories.Analyses a,
             HealthRepositories.Jobs j,
             AuthenticatedUser u,
             ObjectMapper o) {
         routines = r;
-        days = d;
-        sections = s;
         items = i;
         analyses = a;
         jobs = j;
@@ -92,15 +86,8 @@ public class RoutineService {
                                     start,
                                     weeks,
                                     previous));
-            RoutineDay day = days.save(new RoutineDay(r.getId(), 1, start, 18));
-            RoutineSection main =
-                    sections.save(
-                            new RoutineSection(
-                                    day.getId(), RoutineSection.Type.MAIN_EXERCISE, "본 운동", 1));
-            RoutineSection cool =
-                    sections.save(
-                            new RoutineSection(
-                                    day.getId(), RoutineSection.Type.COOL_DOWN, "마무리 스트레칭", 2));
+            long mainSectionId = r.getId() * 1000 + 11;
+            long coolSectionId = r.getId() * 1000 + 12;
             String[][] ex = {
                 {"점핑잭", "20", "SECONDS"},
                 {"복부 크런치", "15", "REPETITIONS"},
@@ -120,11 +107,17 @@ public class RoutineService {
                 {"어린이 포즈", "30", "SECONDS"}
             };
             for (int x = 0; x < ex.length; x++) {
-                Long section = x < 11 ? main.getId() : cool.getId();
+                boolean mainSection = x < 11;
                 items.save(
                         new ExerciseItem(
                                 r.getId(),
-                                section,
+                                mainSection ? mainSectionId : coolSectionId,
+                                1,
+                                start,
+                                18,
+                                mainSection ? "MAIN_EXERCISE" : "COOL_DOWN",
+                                mainSection ? "본 운동" : "마무리 스트레칭",
+                                mainSection ? 1 : 2,
                                 ex[x][0],
                                 x < 11 ? x + 1 : x - 10,
                                 new BigDecimal(ex[x][1]),
@@ -146,7 +139,13 @@ public class RoutineService {
                     items.save(
                             new ExerciseItem(
                                     r.getId(),
-                                    main.getId(),
+                                    mainSectionId,
+                                    protectedItem.getWeek(),
+                                    start,
+                                    protectedItem.getEstimatedMinutes(),
+                                    protectedItem.getSectionType(),
+                                    protectedItem.getSectionTitle(),
+                                    protectedItem.getSectionOrder(),
                                     protectedItem.getName(),
                                     order++,
                                     protectedItem.getTargetValue(),
@@ -196,27 +195,21 @@ public class RoutineService {
 
     public Detail detail(Long id) {
         Routine r = owned(id);
-        List<DayView> dv =
-                days.findByRoutineIdOrderByScheduledDate(id).stream()
-                        .map(
-                                d ->
-                                        new DayView(
-                                                d,
-                                                sections
-                                                        .findByRoutineDayIdOrderBySortOrder(
-                                                                d.getId())
-                                                        .stream()
-                                                        .map(
-                                                                s ->
-                                                                        new SectionView(
-                                                                                s,
-                                                                                items
-                                                                                        .findBySectionIdAndDeletedAtIsNullOrderBySortOrder(
-                                                                                                s
-                                                                                                        .getId())))
-                                                        .toList()))
+        List<ExerciseItem> all =
+                items
+                        .findByRoutineIdAndDeletedAtIsNullOrderByScheduledDateAscSectionOrderAscSortOrderAsc(
+                                id);
+        Map<LocalDate, List<ExerciseItem>> byDate = new LinkedHashMap<>();
+        all.forEach(
+                item ->
+                        byDate.computeIfAbsent(
+                                        item.getScheduledDate(), ignored -> new ArrayList<>())
+                                .add(item));
+        List<DayView> dayViews =
+                byDate.entrySet().stream()
+                        .map(entry -> dayView(entry.getKey(), entry.getValue()))
                         .toList();
-        return new Detail(r, dv);
+        return new Detail(r, dayViews);
     }
 
     @Transactional
@@ -233,13 +226,10 @@ public class RoutineService {
 
     @Transactional
     public ExerciseItem add(Long routineId, Long sectionId, RoutineRequests.ExerciseRequest q) {
-        Routine r = owned(routineId);
-        List<Long> ds =
-                days.findByRoutineIdOrderByScheduledDate(r.getId()).stream()
-                        .map(RoutineDay::getId)
-                        .toList();
-        sections.findByIdAndRoutineDayIdIn(sectionId, ds)
-                .orElseThrow(() -> ApiException.notFound("루틴 구간을 찾을 수 없습니다."));
+        owned(routineId);
+        ExerciseItem sectionTemplate =
+                items.findFirstByRoutineIdAndSectionIdAndDeletedAtIsNull(routineId, sectionId)
+                        .orElseThrow(() -> ApiException.notFound("루틴 구간을 찾을 수 없습니다."));
         validateUrl(q.videoUrl());
         List<ExerciseItem> existing =
                 items.findBySectionIdAndDeletedAtIsNullOrderBySortOrder(sectionId);
@@ -251,6 +241,12 @@ public class RoutineService {
                 new ExerciseItem(
                         routineId,
                         sectionId,
+                        sectionTemplate.getWeek(),
+                        sectionTemplate.getScheduledDate(),
+                        sectionTemplate.getEstimatedMinutes(),
+                        sectionTemplate.getSectionType(),
+                        sectionTemplate.getSectionTitle(),
+                        sectionTemplate.getSectionOrder(),
                         q.name(),
                         order,
                         q.targetValue(),
@@ -341,9 +337,50 @@ public class RoutineService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "영상 URL은 HTTPS만 허용합니다.");
     }
 
+    private DayView dayView(LocalDate date, List<ExerciseItem> dayItems) {
+        ExerciseItem first = dayItems.getFirst();
+        Map<Long, List<ExerciseItem>> bySection = new LinkedHashMap<>();
+        dayItems.forEach(
+                item ->
+                        bySection
+                                .computeIfAbsent(item.getSectionId(), ignored -> new ArrayList<>())
+                                .add(item));
+        List<SectionView> sectionViews =
+                bySection.entrySet().stream()
+                        .map(
+                                entry -> {
+                                    ExerciseItem section = entry.getValue().getFirst();
+                                    return new SectionView(
+                                            entry.getKey(),
+                                            section.getSectionType(),
+                                            section.getSectionTitle(),
+                                            section.getSectionOrder(),
+                                            entry.getValue());
+                                })
+                        .toList();
+        return new DayView(
+                first.getId(),
+                first.getDayOfWeek(),
+                first.getWeek(),
+                date,
+                first.getEstimatedMinutes(),
+                sectionViews);
+    }
+
     public record Detail(Routine routine, List<DayView> days) {}
 
-    public record DayView(RoutineDay day, List<SectionView> sections) {}
+    public record DayView(
+            Long routineDayId,
+            String dayOfWeek,
+            int week,
+            LocalDate scheduledDate,
+            Integer estimatedMinutes,
+            List<SectionView> sections) {}
 
-    public record SectionView(RoutineSection section, List<ExerciseItem> exercises) {}
+    public record SectionView(
+            Long sectionId,
+            String sectionType,
+            String title,
+            int order,
+            List<ExerciseItem> exercises) {}
 }

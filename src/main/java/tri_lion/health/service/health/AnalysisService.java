@@ -3,7 +3,6 @@ package tri_lion.health.service.health;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.*;
 import org.springframework.data.domain.*;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tri_lion.health.domain.health.*;
@@ -16,7 +15,6 @@ public class AnalysisService {
     private final HealthRepositories.Analyses analyses;
     private final HealthRepositories.Documents docs;
     private final HealthRepositories.Jobs jobs;
-    private final JdbcTemplate jdbc;
     private final ObjectMapper json;
     private final AuthenticatedUser auth;
 
@@ -24,13 +22,11 @@ public class AnalysisService {
             HealthRepositories.Analyses a,
             HealthRepositories.Documents d,
             HealthRepositories.Jobs j,
-            JdbcTemplate db,
             ObjectMapper o,
             AuthenticatedUser au) {
         analyses = a;
         docs = d;
         jobs = j;
-        jdbc = db;
         json = o;
         auth = au;
     }
@@ -48,13 +44,8 @@ public class AnalysisService {
             if (existing.isPresent())
                 return analyses.findById(existing.get().getResultId()).orElseThrow();
         }
-        Analysis a = analyses.save(new Analysis(uid));
-        for (Long id : ids)
-            jdbc.update(
-                    "insert into analysis_documents(analysis_id,document_id) values (?,?)",
-                    a.getId(),
-                    id);
         try {
+            Analysis a = analyses.save(new Analysis(uid, json.writeValueAsString(ids)));
             jobs.save(
                     new AiJob(
                             uid,
@@ -62,10 +53,10 @@ public class AnalysisService {
                             json.writeValueAsString(Map.of("documentIds", ids)),
                             a.getId(),
                             key));
+            return a;
         } catch (Exception e) {
             throw ApiException.conflict("같은 Idempotency-Key의 요청이 이미 처리되었습니다.");
         }
-        return a;
     }
 
     public Analysis one(Long id) {

@@ -22,6 +22,10 @@ public class Analysis {
     @Column(name = "analysis_type")
     private String analysisType;
 
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "source_document_ids")
+    private String sourceDocumentIds;
+
     private String summary;
 
     @JdbcTypeCode(SqlTypes.JSON)
@@ -47,9 +51,10 @@ public class Analysis {
     @Column(name = "created_at")
     private Instant createdAt;
 
-    public Analysis(Long userId) {
+    public Analysis(Long userId, String sourceDocumentIds) {
         this.userId = userId;
         analysisType = "HEALTH_ANALYSIS";
+        this.sourceDocumentIds = sourceDocumentIds;
         status = Status.PENDING;
         createdAt = Instant.now();
     }

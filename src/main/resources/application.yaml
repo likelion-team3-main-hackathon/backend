@@ -4,9 +4,9 @@ spring:
   profiles:
     default: local
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/aac_wellness?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC}
-    username: ${SPRING_DATASOURCE_USERNAME:aac_user}
-    password: ${SPRING_DATASOURCE_PASSWORD:aac_password}
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/mcc_wellness?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC}
+    username: ${SPRING_DATASOURCE_USERNAME:mcc_user}
+    password: ${SPRING_DATASOURCE_PASSWORD:mcc_password}
   jpa:
     open-in-view: false
     hibernate:

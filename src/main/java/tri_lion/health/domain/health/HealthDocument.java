@@ -67,7 +67,7 @@ public class HealthDocument {
         MEDICAL_RECORD,
         PRESCRIPTION,
         INBODY,
-        AAC_RESULT,
+        MCC_RESULT,
         OTHER
     }
 

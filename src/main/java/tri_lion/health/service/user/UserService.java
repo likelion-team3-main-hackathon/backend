@@ -3,7 +3,6 @@ package tri_lion.health.service.user;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.*;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tri_lion.health.domain.user.*;
@@ -18,7 +17,6 @@ public class UserService {
     private final UserRepositories.Users users;
     private final UserRepositories.Agreements agreements;
     private final UserRepositories.Profiles profiles;
-    private final JdbcTemplate jdbc;
     private final ObjectMapper json;
 
     public UserService(
@@ -26,13 +24,11 @@ public class UserService {
             UserRepositories.Users u,
             UserRepositories.Agreements g,
             UserRepositories.Profiles p,
-            JdbcTemplate j,
             ObjectMapper o) {
         auth = a;
         users = u;
         agreements = g;
         profiles = p;
-        jdbc = j;
         json = o;
     }
 
@@ -85,25 +81,13 @@ public class UserService {
                     json.writeValueAsString(r.availableExerciseDays()),
                     json.writeValueAsString(r.dietaryPreferences()),
                     json.writeValueAsString(r.allergies()),
-                    json.writeValueAsString(r.dislikedFoods()));
+                    json.writeValueAsString(r.dislikedFoods()),
+                    json.writeValueAsString(r.goals()),
+                    json.writeValueAsString(r.injuries()));
         } catch (Exception e) {
             throw new IllegalArgumentException(e);
         }
         profiles.save(p);
-        jdbc.update("delete from user_goals where user_id=?", u.getId());
-        for (String g : r.goals())
-            jdbc.update(
-                    "insert into user_goals(user_id,goal_type,target_value) values (?,?,?)",
-                    u.getId(),
-                    g,
-                    r.targetWeightKg());
-        jdbc.update("delete from user_injuries where user_id=?", u.getId());
-        for (var i : r.injuries())
-            jdbc.update(
-                    "insert into user_injuries(user_id,body_part,description) values (?,?,?)",
-                    u.getId(),
-                    i.bodyPart(),
-                    i.description());
         u.onboardingCompleted(r.name());
         return p.getUpdatedAt();
     }

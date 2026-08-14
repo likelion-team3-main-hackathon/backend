@@ -19,24 +19,17 @@ public final class RoutineRepositories {
                         Long user, LocalDate a, LocalDate b);
     }
 
-    public interface Days extends JpaRepository<RoutineDay, Long> {
-        List<RoutineDay> findByRoutineIdOrderByScheduledDate(Long id);
-
-        Optional<RoutineDay> findByIdAndRoutineId(Long id, Long r);
-
-        Optional<RoutineDay> findByRoutineIdAndScheduledDate(Long r, LocalDate date);
-    }
-
-    public interface Sections extends JpaRepository<RoutineSection, Long> {
-        List<RoutineSection> findByRoutineDayIdOrderBySortOrder(Long day);
-
-        Optional<RoutineSection> findByIdAndRoutineDayIdIn(Long id, Collection<Long> days);
-    }
-
     public interface Items extends JpaRepository<ExerciseItem, Long> {
         List<ExerciseItem> findByRoutineIdAndDeletedAtIsNullOrderBySortOrder(Long r);
 
+        List<ExerciseItem>
+                findByRoutineIdAndDeletedAtIsNullOrderByScheduledDateAscSectionOrderAscSortOrderAsc(
+                        Long r);
+
         List<ExerciseItem> findBySectionIdAndDeletedAtIsNullOrderBySortOrder(Long s);
+
+        Optional<ExerciseItem> findFirstByRoutineIdAndSectionIdAndDeletedAtIsNull(
+                Long routineId, Long sectionId);
 
         Optional<ExerciseItem> findByIdAndRoutineIdAndDeletedAtIsNull(Long id, Long routine);
     }

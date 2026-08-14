@@ -51,6 +51,12 @@ public class HealthProfile {
     @Column(name = "disliked_foods")
     private String dislikedFoods;
 
+    @JdbcTypeCode(SqlTypes.JSON)
+    private String goals;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    private String injuries;
+
     @Column(name = "updated_at")
     private Instant updatedAt;
 
@@ -69,7 +75,9 @@ public class HealthProfile {
             String days,
             String diet,
             String allergies,
-            String disliked) {
+            String disliked,
+            String goals,
+            String injuries) {
         birthDate = b;
         gender = g;
         heightCm = h;
@@ -81,6 +89,8 @@ public class HealthProfile {
         dietaryPreferences = diet;
         this.allergies = allergies;
         dislikedFoods = disliked;
+        this.goals = goals;
+        this.injuries = injuries;
         updatedAt = Instant.now();
     }
 }

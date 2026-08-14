@@ -3,6 +3,7 @@ package tri_lion.health.domain.routine;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import lombok.*;
 
 @Entity
@@ -20,6 +21,27 @@ public class ExerciseItem {
 
     @Column(name = "section_id")
     private Long sectionId;
+
+    @Column(name = "week_number")
+    private int week;
+
+    @Column(name = "day_of_week")
+    private String dayOfWeek;
+
+    @Column(name = "scheduled_date")
+    private LocalDate scheduledDate;
+
+    @Column(name = "estimated_minutes")
+    private Integer estimatedMinutes;
+
+    @Column(name = "section_type")
+    private String sectionType;
+
+    @Column(name = "section_title")
+    private String sectionTitle;
+
+    @Column(name = "section_order")
+    private int sectionOrder;
 
     @Column(name = "item_type")
     private String itemType;
@@ -72,6 +94,12 @@ public class ExerciseItem {
     public ExerciseItem(
             Long r,
             Long s,
+            int week,
+            LocalDate date,
+            Integer estimatedMinutes,
+            String sectionType,
+            String sectionTitle,
+            int sectionOrder,
             String n,
             int o,
             BigDecimal v,
@@ -85,6 +113,13 @@ public class ExerciseItem {
             Routine.Editor editor) {
         routineId = r;
         sectionId = s;
+        this.week = week;
+        scheduledDate = date;
+        dayOfWeek = date.getDayOfWeek().name();
+        this.estimatedMinutes = estimatedMinutes;
+        this.sectionType = sectionType;
+        this.sectionTitle = sectionTitle;
+        this.sectionOrder = sectionOrder;
         itemType = "EXERCISE";
         name = n;
         sortOrder = o;
