@@ -94,6 +94,8 @@ public class AiJobWorker {
         if (llm.live()) limits.reserveExternalCall(job.userId(), job.type());
         String extracted = ocr.extract(task.documents());
         validateExtraction(extracted, task.documentIds());
+        healthTasks.saveExtraction(
+                job.userId(), extracted, ocr.modelVersion(), ocr.promptVersion());
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("documents", json.readTree(maskDirectIdentifiers(extracted)).path("documents"));
         input.put("profile", task.profile());

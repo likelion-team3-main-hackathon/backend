@@ -1,12 +1,15 @@
 package tri_lion.health;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import com.fasterxml.jackson.databind.*;
+import jakarta.persistence.EntityManager;
 import jakarta.servlet.http.Cookie;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,6 +20,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import tri_lion.health.repository.health.HealthRepositories;
 import tri_lion.health.service.health.AiJobWorker;
 
 @SpringBootTest(
@@ -28,12 +32,14 @@ class CoreFlowIntegrationTests {
     @Autowired ObjectMapper json;
     @Autowired AiJobWorker worker;
     @Autowired JdbcTemplate db;
+    @Autowired EntityManager entityManager;
+    @Autowired HealthRepositories.Analyses analysisRepository;
 
     @Test
     void openApiExposesBearerAuthenticationScheme() throws Exception {
         mvc.perform(get("/v3/api-docs"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.info.title").value("Tri Lion Wellness API"))
+                .andExpect(jsonPath("$.info.title").value("MCC Wellness API"))
                 .andExpect(jsonPath("$.components.securitySchemes.bearerAuth.type").value("http"))
                 .andExpect(
                         jsonPath("$.components.securitySchemes.bearerAuth.scheme").value("bearer"));
@@ -120,11 +126,16 @@ class CoreFlowIntegrationTests {
                                 userId))
                 .isEqualTo(1);
         worker.work();
-        mvc.perform(
-                        get("/api/v1/health-analyses/{id}", analysisId)
-                                .header("Authorization", "Bearer " + access))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.status").value("COMPLETED"));
+        await().atMost(Duration.ofSeconds(3))
+                .untilAsserted(
+                        () ->
+                                mvc.perform(
+                                                get("/api/v1/health-analyses/{id}", analysisId)
+                                                        .header(
+                                                                "Authorization",
+                                                                "Bearer " + access))
+                                        .andExpect(status().isOk())
+                                        .andExpect(jsonPath("$.data.status").value("COMPLETED")));
 
         var generation =
                 mvc.perform(
@@ -276,6 +287,52 @@ class CoreFlowIntegrationTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.length()").value(1))
                 .andExpect(jsonPath("$.data[0].type").value("REHABILITATION"));
+        mvc.perform(
+                        get("/api/v1/analysis-labs/overview?period=DAILY&anchorDate=2026-08-11")
+                                .header("Authorization", "Bearer " + access))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.period.type").value("DAILY"))
+                .andExpect(jsonPath("$.data.metrics.length()").value(3))
+                .andExpect(jsonPath("$.data.labPreviews.length()").value(3));
+        mvc.perform(
+                        get("/api/v1/analysis-labs/nutrition?from=2026-08-05&to=2026-08-11")
+                                .header("Authorization", "Bearer " + access))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.recordedDays").value(1))
+                .andExpect(jsonPath("$.data.dailyTrend.length()").value(7));
+        mvc.perform(
+                        get("/api/v1/analysis-labs/exercise?from=2026-08-05&to=2026-08-11")
+                                .header("Authorization", "Bearer " + access))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.completedSets").isNumber())
+                .andExpect(jsonPath("$.data.muscleGroupVolumes").isArray());
+        mvc.perform(
+                        get("/api/v1/analysis-labs/body-composition?from=2025-08-15&to=2026-08-15")
+                                .header("Authorization", "Bearer " + access))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("INSUFFICIENT_DATA"))
+                .andExpect(jsonPath("$.data.action.type").value("UPLOAD_HEALTH_DOCUMENT"));
+        var legacyAnalysis = analysisRepository.findById(analysisId).orElseThrow();
+        legacyAnalysis.complete(
+                "기존 체성분 분석",
+                "{\"bodyCompositionFindings\":[{\"sourceDocumentId\":"
+                        + documentId
+                        + ",\"label\":\"체지방률\",\"value\":27.4,\"unit\":\"%\",\"interpretation\":\"기존 분석값\"}]}");
+        analysisRepository.saveAndFlush(legacyAnalysis);
+        entityManager.clear();
+        mvc.perform(
+                        get("/api/v1/analysis-labs/body-composition?from=2025-08-15&to=2026-08-15")
+                                .header("Authorization", "Bearer " + access))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PARTIAL"))
+                .andExpect(jsonPath("$.data.latest.bodyFatPercent").value(27.4));
+        assertThat(
+                        db.queryForObject(
+                                "select count(*) from health_measurements where user_id=? and document_id=? and metric_code='BODY_FAT_PERCENT'",
+                                Integer.class,
+                                userId,
+                                documentId))
+                .isEqualTo(1);
         mvc.perform(
                         post("/api/v1/routine-records")
                                 .header("Authorization", "Bearer " + access)

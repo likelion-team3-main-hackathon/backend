@@ -20,7 +20,7 @@ public class PromptCatalog {
 
     public PromptCatalog(
             ResourceLoader resources,
-            @Value("${app.ai.prompts.document-extraction-version:document-v1-multi}")
+            @Value("${app.ai.prompts.document-extraction-version:document-v2-body-parts}")
                     String documentExtractionVersion,
             @Value("${app.ai.prompts.health-analysis-version:health-v3-multi-document}")
                     String healthAnalysisVersion,

@@ -30,6 +30,16 @@ public final class HealthRepositories {
                 Long user, Analysis.Status status);
     }
 
+    public interface Measurements extends JpaRepository<HealthMeasurement, Long> {
+        void deleteByDocumentId(Long documentId);
+
+        List<HealthMeasurement> findByUserIdAndCategoryAndMeasuredAtBetweenOrderByMeasuredAtAsc(
+                Long userId, String category, java.time.LocalDate from, java.time.LocalDate to);
+
+        List<HealthMeasurement> findByUserIdAndCategoryOrderByMeasuredAtAsc(
+                Long userId, String category);
+    }
+
     public interface Jobs extends JpaRepository<AiJob, Long> {
         @Query(
                 "select j from AiJob j where (j.status in ('PENDING','RETRYING') and (j.nextAttemptAt is null or j.nextAttemptAt<=:now)) or (j.status='PROCESSING' and j.updatedAt<=:staleBefore) order by j.createdAt")

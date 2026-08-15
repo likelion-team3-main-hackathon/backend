@@ -5,6 +5,8 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import lombok.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "routine_items")
@@ -50,6 +52,10 @@ public class ExerciseItem {
     private String name;
 
     private String content;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "muscle_groups")
+    private String muscleGroups;
 
     @Column(name = "scheduled_at")
     private Instant scheduledAt;
@@ -209,6 +215,10 @@ public class ExerciseItem {
 
     public void order(int i) {
         sortOrder = i;
+    }
+
+    public void muscleGroups(String value) {
+        muscleGroups = value;
     }
 
     public void delete() {

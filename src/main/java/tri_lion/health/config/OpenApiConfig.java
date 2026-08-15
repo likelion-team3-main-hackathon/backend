@@ -18,7 +18,7 @@ public class OpenApiConfig {
         return new OpenAPI()
                 .info(
                         new Info()
-                                .title("Tri Lion Wellness API")
+                                .title("MCC Wellness API")
                                 .description("개인 맞춤 건강 분석, 루틴, 액티비티 및 전문가 커리큘럼 API")
                                 .version("v1"))
                 .servers(List.of(new Server().url("/").description("현재 서버")))
