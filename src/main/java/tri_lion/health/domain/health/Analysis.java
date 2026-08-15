@@ -65,12 +65,16 @@ public class Analysis {
     }
 
     public void complete(String summary, String details) {
+        complete(summary, details, "fake-v1", "health-v1");
+    }
+
+    public void complete(String summary, String details, String model, String prompt) {
         this.summary = summary;
         this.details = details;
         status = Status.COMPLETED;
         progress = 100;
-        modelVersion = "fake-v1";
-        promptVersion = "health-v1";
+        modelVersion = model;
+        promptVersion = prompt;
         completedAt = Instant.now();
     }
 

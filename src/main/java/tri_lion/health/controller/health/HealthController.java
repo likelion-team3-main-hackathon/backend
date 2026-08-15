@@ -109,6 +109,9 @@ public class HealthController {
         m.put("status", a.getStatus());
         m.put("progress", a.getProgress());
         m.put("summary", a.getSummary());
+        m.put("failureReason", a.getFailureReason());
+        m.put("modelVersion", a.getModelVersion());
+        m.put("promptVersion", a.getPromptVersion());
         if (a.getDetails() != null)
             try {
                 m.putAll(json.readValue(a.getDetails(), Map.class));

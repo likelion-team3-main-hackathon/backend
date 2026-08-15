@@ -66,7 +66,27 @@ public class Routine {
 
     public Routine(
             Long u, String title, LocalDate start, int weeks, Long previous, Type routineType) {
-        this(u, title, start, weeks, previous, null, routineType, Source.AI_GENERATED);
+        this(
+                u,
+                title,
+                "개인 제약을 반영한 맞춤 웰니스 루틴입니다.",
+                start,
+                weeks,
+                previous,
+                null,
+                routineType,
+                Source.AI_GENERATED);
+    }
+
+    public Routine(
+            Long u,
+            String title,
+            String description,
+            LocalDate start,
+            int weeks,
+            Long previous,
+            Type routineType) {
+        this(u, title, description, start, weeks, previous, null, routineType, Source.AI_GENERATED);
     }
 
     public Routine(
@@ -78,9 +98,31 @@ public class Routine {
             Long sourceCurriculumId,
             Type routineType,
             Source routineSource) {
+        this(
+                u,
+                title,
+                "개인 제약을 반영한 맞춤 웰니스 루틴입니다.",
+                start,
+                weeks,
+                previous,
+                sourceCurriculumId,
+                routineType,
+                routineSource);
+    }
+
+    public Routine(
+            Long u,
+            String title,
+            String description,
+            LocalDate start,
+            int weeks,
+            Long previous,
+            Long sourceCurriculumId,
+            Type routineType,
+            Source routineSource) {
         userId = u;
         this.title = title;
-        description = "개인 제약을 반영한 맞춤 웰니스 루틴입니다.";
+        this.description = description;
         type = routineType;
         source = routineSource;
         startDate = start;

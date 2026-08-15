@@ -2,7 +2,7 @@
 
 ## [프로젝트 진행 상황 및 구현 현황]
 
-**전체 진행률 (Status): 🟡 핵심 MVP 구현 완료 / 외부 실서비스 Adapter 연결 대기**
+**전체 진행률 (Status): 🟡 핵심 MVP·Gemini Adapter 구현 완료 / 실키 검증 대기**
 
 ### 명세서 대비 구현 현황 체크리스트
 
@@ -11,8 +11,9 @@
 - [x] **API Endpoints — 건강/분석:** 문서 업로드·목록·삭제, 분석 생성·이력·최신·단건 조회
 - [x] **API Endpoints — 루틴/기록:** 생성 상태, 오늘/전체/상세, 루틴 수정, 운동 추가·수정·삭제·순서 변경, 재조정, 기록, 최신 코칭
 - [x] **API Endpoints — 확장:** 홈, 전문가 신청·콘텐츠·이용, 식품 추천·장바구니 API 기본 구현
-- [x] **Core Logic / AI Agent:** MySQL 영속 Job Queue, 상태 전이, 멱등성 키, 재시도, 결정적 Fake OCR/LLM, 분석·루틴·코칭 Worker 연동
-- [ ] **실서비스 Adapter:** Google OIDC는 운영 검증 구현 완료. 실제 OCR/LLM 및 S3/MinIO 저장 Adapter, 제휴사 API는 교체 지점만 마련되어 있고 local/test Fake를 사용
+- [x] **Core Logic / AI Agent:** MySQL 영속 Job Queue, 작업 선점, 트랜잭션 외부 호출, 멱등성·재시도, 구조화 응답 검증, 분석·루틴·코칭 Worker 연동
+- [x] **Gemini Adapter:** PDF/JPG/PNG 다중 문서 추출, 인바디·알레르기·진단서 종합 분석, 추천 카드 생성, 선택 기반 전체 기간 루틴 생성, 기록 코칭 구현. 키가 없는 기본 환경은 결정적 Fake 사용
+- [ ] **외부 인프라 Adapter:** 실제 MinIO/S3 저장 Adapter, 필요 시 Document AI OCR, 제휴사 API 연결 대기
 - [ ] **운영 고도화:** Redis 캐시/분산 락, 전문가 승인 관리자 API, 인증서 파일 저장, 허용 영상 도메인 목록, 유료 영상 Signed URL, 운영 관측 대시보드
 
 ### 현재 구현 완료된 주요 기능
@@ -21,7 +22,8 @@
 - 자체 JWT Access Token, HttpOnly/Secure Refresh Cookie, SHA-256 해시 저장 및 Rotation/재사용 차단
 - 민감 건강정보 동의와 사용자 상태에 따른 건강 API 접근 제한
 - JPG/PNG/PDF 확장자·MIME·파일 시그니처·10MB 제한 검증 및 임의 Object Key 저장
-- DB 기반 비동기 AI 작업, 최대 3회 지수 백오프, 사용자·작업 유형·멱등성 키 중복 방지
+- DB 기반 비동기 AI 작업, 최대 3회 재시도, Gemini 429/503별 백오프, 구체적 실패 사유 기록, 사용자·작업 유형·멱등성 키 중복 방지
+- Gemini 구조화 출력 기반 문서별 근거 보존·종합 웰니스 분석, 식단/운동 추천 요약 카드, 사용자 선택 기반 전체 날짜별 계획 생성, 수행 코칭과 모델·프롬프트 버전 기록
 - 분석 이력 및 최신/단건 결과 재조회
 - 전체 기간의 날짜별 운동·재활·식단 루틴 생성, 논리 구간별 그룹 조회, 사용자 편집 표시, 수정 보호, 순서 무결성 검증, 낙관적 락
 - 운동 세션 항목 일괄 완료, 패스 후 재수행, 수행 기록·인증 사진 키 보존, 별도 코칭 작업 생성
@@ -32,9 +34,9 @@
 
 ### 다음 작업 예정 항목 (Next Steps)
 
-1. 실제 Object Storage SDK Adapter를 연결해 local Compose에서도 MinIO에 파일을 저장하고 Signed URL을 발급합니다.
-2. 운영 OCR/LLM Provider Adapter, timeout/circuit breaker와 JSON Schema 검증을 연결합니다.
-3. 전문가 인증서 저장·관리자 승인, 콘텐츠 lesson 영속화와 제휴 쇼핑몰 실제 API를 완성합니다.
+1. 테스트용 Gemini 키로 비식별 샘플 문서 품질을 평가하고 숫자·단위 정확도가 부족하면 Document AI OCR을 추가합니다.
+2. 실제 Object Storage SDK Adapter를 연결해 local Compose에서도 MinIO에 파일을 저장하고 Signed URL을 발급합니다.
+3. Gemini 호출 circuit breaker와 운영 알림, 전문가 인증서·관리자 승인 및 제휴 쇼핑몰 API를 완성합니다.
 4. Testcontainers MySQL 8 보안/소유권/재시도 테스트와 Docker Smoke Test를 CI에 추가합니다.
 
 ## 기술 스택
@@ -110,6 +112,28 @@ docker compose down
 
 Fake OCR/LLM은 네트워크 없이 결정적인 분석·루틴·코칭 결과를 생성합니다. 실제 Google 검증은 `local`, `test`가 아닌 프로필에서 issuer JWK와 `GOOGLE_CLIENT_ID` audience를 검증합니다.
 
+## Gemini 실제 API 사용법
+
+기본값은 `AI_PROVIDER=fake`입니다. Gemini Developer API를 로컬 Docker에서 검증하려면 실제 `.env`만 다음처럼 변경합니다.
+
+```dotenv
+AI_PROVIDER=gemini
+GOOGLE_API_KEY=Google_AI_Studio에서_발급한_키
+GEMINI_MODEL_ANALYSIS=gemini-3.6-flash
+GEMINI_MODEL_ROUTINE=gemini-3.6-flash
+GEMINI_MODEL_COACHING=gemini-3.5-flash-lite
+```
+
+```bash
+docker compose up -d --build app
+docker compose logs -f app
+```
+
+- 키는 프론트 환경 변수에 넣지 않고 백엔드 `.env`에만 저장합니다.
+- 무료·개인 테스트 프로젝트에 실제 사용자 건강 문서를 넣지 말고 비식별 샘플을 사용합니다.
+- 현재 local Object Storage는 메모리 구현이므로 앱을 재시작하면 기존 업로드 바이너리가 사라집니다. 재시작 후에는 문서를 다시 업로드해야 합니다.
+- `AI_PROVIDER=fake`로 되돌리면 네트워크 없이 기존 Postman 전체 흐름을 테스트할 수 있습니다.
+
 ## Postman 로컬 API 테스트
 
 다음 두 파일을 Postman에서 각각 Import합니다.
@@ -165,7 +189,10 @@ docker compose --env-file .env.example config --quiet
 | `OBJECT_STORAGE_ENDPOINT` | S3 호환 Endpoint |
 | `OBJECT_STORAGE_BUCKET_PRIVATE/PUBLIC` | 비공개 건강 문서/공개 콘텐츠 버킷 |
 | `OBJECT_STORAGE_ACCESS_KEY/SECRET_KEY` | Object Storage 자격증명 |
-| `AI_API_KEY`, `OCR_API_KEY` | 운영 AI/OCR Provider 키 |
+| `AI_PROVIDER` | `fake` 또는 `gemini` |
+| `GOOGLE_API_KEY` | Gemini Developer API 키. 실제 값은 `.env`에만 저장 |
+| `GEMINI_MODEL_ANALYSIS/ROUTINE/COACHING` | 기능별 Gemini 모델 ID |
+| `AI_CONNECT_TIMEOUT_SECONDS`, `AI_READ_TIMEOUT_SECONDS` | Gemini 연결·응답 제한 시간 |
 | `FRONTEND_ORIGIN` | 허용 CORS Origin |
 | `JAVA_OPTS` | 컨테이너 JVM 옵션 |
 

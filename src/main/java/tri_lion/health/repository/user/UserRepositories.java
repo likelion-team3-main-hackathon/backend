@@ -1,7 +1,9 @@
 package tri_lion.health.repository.user;
 
+import jakarta.persistence.LockModeType;
 import java.util.*;
-import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.*;
+import org.springframework.data.repository.query.Param;
 import tri_lion.health.domain.user.*;
 
 public final class UserRepositories {
@@ -9,6 +11,10 @@ public final class UserRepositories {
 
     public interface Users extends JpaRepository<User, Long> {
         Optional<User> findByGoogleUserId(String sub);
+
+        @Lock(LockModeType.PESSIMISTIC_WRITE)
+        @Query("select u from User u where u.id=:id")
+        Optional<User> findForUpdateById(@Param("id") Long id);
     }
 
     public interface Agreements extends JpaRepository<UserAgreement, Long> {

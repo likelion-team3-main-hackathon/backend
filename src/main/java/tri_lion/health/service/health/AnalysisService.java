@@ -8,6 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 import tri_lion.health.domain.health.*;
 import tri_lion.health.exception.ApiException;
 import tri_lion.health.repository.health.HealthRepositories;
+import tri_lion.health.repository.user.UserRepositories;
 import tri_lion.health.security.AuthenticatedUser;
 
 @Service
@@ -15,6 +16,7 @@ public class AnalysisService {
     private final HealthRepositories.Analyses analyses;
     private final HealthRepositories.Documents docs;
     private final HealthRepositories.Jobs jobs;
+    private final UserRepositories.Users users;
     private final ObjectMapper json;
     private final AuthenticatedUser auth;
 
@@ -22,11 +24,13 @@ public class AnalysisService {
             HealthRepositories.Analyses a,
             HealthRepositories.Documents d,
             HealthRepositories.Jobs j,
+            UserRepositories.Users u,
             ObjectMapper o,
             AuthenticatedUser au) {
         analyses = a;
         docs = d;
         jobs = j;
+        users = u;
         json = o;
         auth = au;
     }
@@ -35,6 +39,7 @@ public class AnalysisService {
     public Analysis create(List<Long> ids, String key) {
         Long uid = auth.sensitive().getId();
         if (ids == null || ids.isEmpty()) throw new IllegalArgumentException("분석할 문서가 필요합니다.");
+        users.findForUpdateById(uid).orElseThrow();
         for (Long id : ids)
             docs.findByIdAndUserIdAndDeletedAtIsNull(id, uid)
                     .orElseThrow(() -> ApiException.notFound("건강 문서를 찾을 수 없습니다."));
@@ -54,8 +59,8 @@ public class AnalysisService {
                             a.getId(),
                             key));
             return a;
-        } catch (Exception e) {
-            throw ApiException.conflict("같은 Idempotency-Key의 요청이 이미 처리되었습니다.");
+        } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
+            throw new IllegalArgumentException("건강 분석 요청을 구성할 수 없습니다.", exception);
         }
     }
 

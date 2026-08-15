@@ -12,11 +12,15 @@ import org.springframework.transaction.annotation.Transactional;
 import tri_lion.health.domain.health.*;
 import tri_lion.health.domain.record.ActivityType;
 import tri_lion.health.domain.routine.*;
+import tri_lion.health.domain.user.HealthProfile;
 import tri_lion.health.dto.request.routine.RoutineRequests;
 import tri_lion.health.exception.ApiException;
+import tri_lion.health.external.ai.AiClients;
 import tri_lion.health.repository.health.HealthRepositories;
 import tri_lion.health.repository.routine.RoutineRepositories;
+import tri_lion.health.repository.user.UserRepositories;
 import tri_lion.health.security.AuthenticatedUser;
+import tri_lion.health.service.health.AiJobTransactions;
 
 @Service
 public class RoutineService {
@@ -24,25 +28,31 @@ public class RoutineService {
     private final RoutineRepositories.Items items;
     private final HealthRepositories.Analyses analyses;
     private final HealthRepositories.Jobs jobs;
+    private final UserRepositories.Profiles profiles;
     private final AuthenticatedUser auth;
     private final ObjectMapper json;
     private final JdbcTemplate db;
+    private final AiClients.LlmClient llm;
 
     public RoutineService(
             RoutineRepositories.Routines r,
             RoutineRepositories.Items i,
             HealthRepositories.Analyses a,
             HealthRepositories.Jobs j,
+            UserRepositories.Profiles p,
             AuthenticatedUser u,
             ObjectMapper o,
-            JdbcTemplate db) {
+            JdbcTemplate db,
+            AiClients.LlmClient llm) {
         routines = r;
         items = i;
         analyses = a;
         jobs = j;
+        profiles = p;
         auth = u;
         json = o;
         this.db = db;
+        this.llm = llm;
     }
 
     @Transactional
@@ -58,6 +68,7 @@ public class RoutineService {
                                         new ApiException(
                                                 HttpStatus.UNPROCESSABLE_ENTITY,
                                                 "루틴 생성에 필요한 온보딩 또는 건강 분석 정보가 부족합니다."));
+        validateRecommendationSelection(req, a);
         if (key != null) {
             var old =
                     jobs.findByUserIdAndTypeAndIdempotencyKey(
@@ -77,38 +88,57 @@ public class RoutineService {
         }
     }
 
-    @Transactional
-    public Long generate(AiJob job) {
+    public RoutinePlan plan(AiJob job) {
         try {
+            JsonNode request = json.readTree(job.getRequestJson());
+            int mealCount = Math.max(0, request.path("mealCountPerDay").asInt(3));
+            int exerciseDays = Math.max(0, request.path("exerciseDaysPerWeek").asInt(3));
+            String movementType = preferredMovementType(request.path("preferredExerciseTypes"));
+            return routinePlan(job, request, mealCount, exerciseDays, movementType);
+        } catch (Exception exception) {
+            throw new IllegalStateException("AI 루틴 계획을 생성하지 못했습니다.", exception);
+        }
+    }
+
+    @Transactional
+    public Long generate(AiJobTransactions.JobSnapshot snapshot, RoutinePlan plan) {
+        try {
+            AiJob job = snapshot.detachedJob();
             JsonNode n = json.readTree(job.getRequestJson());
             LocalDate start = LocalDate.parse(n.get("startDate").asText());
             int weeks = n.get("durationWeeks").asInt();
             int mealCount = Math.max(0, n.path("mealCountPerDay").asInt(3));
             int exerciseDays = Math.max(0, n.path("exerciseDaysPerWeek").asInt(3));
-            String movementType = preferredMovementType(n.path("preferredExerciseTypes"));
             Long previous =
                     n.hasNonNull("previousRoutineId") ? n.get("previousRoutineId").asLong() : null;
             Routine.Type routineType =
                     mealCount > 0 && exerciseDays > 0
                             ? Routine.Type.MIXED
                             : mealCount > 0 ? Routine.Type.MEAL : Routine.Type.EXERCISE;
-            String title =
-                    previous != null
-                            ? "재조정 맞춤 루틴"
-                            : routineType == Routine.Type.MIXED
-                                    ? "맞춤 웰니스 종합 루틴"
-                                    : routineType == Routine.Type.MEAL ? "맞춤 식단 루틴" : "맞춤 운동 루틴";
+            String title = previous != null ? "재조정 " + plan.title() : plan.title();
             Routine r =
                     routines.save(
                             new Routine(
-                                    job.getUserId(), title, start, weeks, previous, routineType));
-            int totalDays = weeks * 7;
-            for (int dayIndex = 0; dayIndex < totalDays; dayIndex++) {
-                LocalDate date = start.plusDays(dayIndex);
+                                    job.getUserId(),
+                                    title,
+                                    plan.description(),
+                                    start,
+                                    weeks,
+                                    previous,
+                                    routineType));
+            List<RoutineDayPlan> plannedDays =
+                    plan.days().stream()
+                            .sorted(Comparator.comparing(RoutineDayPlan::scheduledDate))
+                            .toList();
+            for (RoutineDayPlan plannedDay : plannedDays) {
+                LocalDate date = plannedDay.scheduledDate();
+                int dayIndex =
+                        Math.toIntExact(java.time.temporal.ChronoUnit.DAYS.between(start, date));
                 int week = dayIndex / 7 + 1;
-                if (mealCount > 0) saveMealDay(r, date, week, dayIndex, mealCount);
-                if (dayIndex % 7 < exerciseDays)
-                    saveExerciseDay(r, date, week, dayIndex, movementType);
+                if (mealCount > 0)
+                    saveMealDay(r, date, week, dayIndex, mealCount, plannedDay.meals());
+                if (!safeExercises(plannedDay).isEmpty())
+                    saveExerciseDay(r, date, week, dayIndex, safeExercises(plannedDay));
             }
             if (previous != null) {
                 for (ExerciseItem protectedItem :
@@ -142,7 +172,9 @@ public class RoutineService {
                                     protectedItem.getEditedBy()));
                 }
             }
-            job.result(r.getId());
+            AiJob persistedJob = jobs.findForUpdateById(snapshot.id()).orElseThrow();
+            persistedJob.result(r.getId());
+            persistedJob.complete(llm.routineModelVersion(), "routine-v4-selected-plan");
             return r.getId();
         } catch (Exception e) {
             throw new IllegalStateException(e);
@@ -157,52 +189,82 @@ public class RoutineService {
         return "EXERCISE";
     }
 
+    private void validateRecommendationSelection(
+            RoutineRequests.GenerationRequest request, Analysis analysis) {
+        List<String> selected =
+                Optional.ofNullable(request.selectedRecommendationIds()).orElse(List.of());
+        if (selected.isEmpty()) return;
+        if (new HashSet<>(selected).size() != selected.size())
+            throw new IllegalArgumentException("추천 루틴 ID를 중복해서 선택할 수 없습니다.");
+        try {
+            JsonNode recommendations =
+                    json.readTree(analysis.getDetails()).path("routineRecommendations");
+            Map<String, JsonNode> byId = new HashMap<>();
+            recommendations.forEach(value -> byId.put(value.path("id").asText(), value));
+            Set<String> categories = new HashSet<>();
+            int expectedWeeks = 0;
+            int expectedMeals = 0;
+            int expectedExerciseDays = 0;
+            for (String id : selected) {
+                JsonNode recommendation = byId.get(id);
+                if (recommendation == null)
+                    throw new IllegalArgumentException("건강 분석에 포함되지 않은 추천 루틴입니다.");
+                String category = recommendation.path("category").asText();
+                if (!categories.add(category))
+                    throw new IllegalArgumentException("식단과 운동 추천은 유형별로 하나만 선택할 수 있습니다.");
+                expectedWeeks =
+                        Math.max(expectedWeeks, recommendation.path("durationWeeks").asInt());
+                if ("MEAL".equals(category))
+                    expectedMeals = recommendation.path("mealCountPerDay").asInt();
+                else if ("EXERCISE".equals(category))
+                    expectedExerciseDays = recommendation.path("exerciseDaysPerWeek").asInt();
+                else throw new IllegalArgumentException("추천 루틴 유형이 올바르지 않습니다.");
+            }
+            if (request.durationWeeks() != expectedWeeks
+                    || request.mealCountPerDay() != expectedMeals
+                    || request.exerciseDaysPerWeek() != expectedExerciseDays)
+                throw new IllegalArgumentException("선택한 추천 루틴의 기간 또는 빈도와 요청이 일치하지 않습니다.");
+        } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
+            throw new IllegalArgumentException("추천 루틴 정보를 읽을 수 없습니다.", exception);
+        }
+    }
+
     private void saveExerciseDay(
-            Routine routine, LocalDate date, int week, int dayIndex, String movementType) {
-        String[][] exercises = {
-            {"점핑잭", "20", "SECONDS"},
-            {"복부 크런치", "15", "REPETITIONS"},
-            {"크로스오버 크런치", "16", "REPETITIONS"},
-            {"러시안 트위스트", "20", "REPETITIONS"},
-            {"마운틴 클라이머", "26", "REPETITIONS"},
-            {"다리 들어올리기", "12", "REPETITIONS"},
-            {"플랭크", "30", "SECONDS"},
-            {"비스듬한 사선 트위스트", "16", "REPETITIONS"},
-            {"크로스 암 크런치", "15", "REPETITIONS"},
-            {"죽은 곤충 자세", "20", "REPETITIONS"},
-            {"마운틴 클라이머", "26", "REPETITIONS"},
-            {"레그 스프레드", "10", "REPETITIONS"},
-            {"플랭크", "30", "SECONDS"},
-            {"고양이 소 포즈", "30", "SECONDS"},
-            {"코브라 스트레칭", "30", "SECONDS"},
-            {"어린이 포즈", "30", "SECONDS"}
-        };
+            Routine routine,
+            LocalDate date,
+            int week,
+            int dayIndex,
+            List<ExerciseTemplate> exercises) {
         long sectionBase = routine.getId() * 1_000_000 + (long) dayIndex * 100;
         Instant scheduledAt = date.atTime(18, 0).atZone(ZoneId.of("Asia/Seoul")).toInstant();
-        for (int index = 0; index < exercises.length; index++) {
-            boolean main = index < 11;
+        Map<String, Integer> sectionOrders =
+                Map.of("WARM_UP", 9, "MAIN_EXERCISE", 10, "COOL_DOWN", 11);
+        Map<String, Integer> sequences = new HashMap<>();
+        int totalMinutes = exercises.stream().mapToInt(ExerciseTemplate::estimatedMinutes).sum();
+        for (int index = 0; index < exercises.size(); index++) {
+            ExerciseTemplate exercise = exercises.get(index);
+            int sectionOrder = sectionOrders.get(exercise.sectionType());
+            int sequence = sequences.merge(exercise.sectionType(), 1, Integer::sum);
             items.save(
                     new ExerciseItem(
                             routine.getId(),
-                            sectionBase + (main ? 10 : 11),
+                            sectionBase + sectionOrder,
                             week,
                             date,
-                            18,
-                            main ? "MAIN_EXERCISE" : "COOL_DOWN",
-                            main
-                                    ? ("REHABILITATION".equals(movementType) ? "재활 운동" : "본 운동")
-                                    : "마무리 스트레칭",
-                            main ? 10 : 11,
-                            movementType,
-                            exercises[index][0],
+                            totalMinutes,
+                            exercise.sectionType(),
+                            exercise.sectionTitle(),
+                            sectionOrder,
+                            exercise.activityType(),
+                            exercise.title(),
                             null,
                             scheduledAt,
-                            main ? index + 1 : index - 10,
-                            new BigDecimal(exercises[index][1]),
-                            ExerciseItem.Unit.valueOf(exercises[index][2]),
-                            1,
-                            index == 10 ? 30 : (main ? 10 : 5),
-                            "https://cdn.example.com/exercises/" + (index + 1) + ".mp4",
+                            sequence,
+                            BigDecimal.valueOf(exercise.targetValue()),
+                            ExerciseItem.Unit.valueOf(exercise.targetUnit()),
+                            exercise.sets(),
+                            exercise.restSeconds(),
+                            null,
                             null,
                             null,
                             false,
@@ -210,39 +272,37 @@ public class RoutineService {
         }
     }
 
-    private void saveMealDay(Routine routine, LocalDate date, int week, int dayIndex, int mealCount)
+    private void saveMealDay(
+            Routine routine,
+            LocalDate date,
+            int week,
+            int dayIndex,
+            int mealCount,
+            List<MealTemplate> templates)
             throws com.fasterxml.jackson.core.JsonProcessingException {
-        String[][] meals = {
-            {"BREAKFAST", "아침", "그릭요거트볼", "420", "38", "26", "12", "7"},
-            {"LUNCH", "점심", "현미밥과 닭가슴살", "610", "82", "41", "18", "12"},
-            {"DINNER", "저녁", "연어구이와 샐러드", "510", "32", "41", "18", "18"},
-            {"SNACK", "간식", "견과류와 과일", "220", "25", "8", "10", "15"},
-            {"SNACK", "간식", "단백질 요거트", "180", "18", "20", "4", "20"},
-            {"SNACK", "간식", "바나나", "110", "28", "1", "0", "21"}
-        };
         long sectionBase = routine.getId() * 1_000_000 + (long) dayIndex * 100;
-        for (int index = 0; index < Math.min(mealCount, meals.length); index++) {
-            String[] meal = meals[index];
+        for (int index = 0; index < Math.min(mealCount, templates.size()); index++) {
+            MealTemplate meal = templates.get(index);
             Map<String, Object> details =
                     Map.of(
-                            "mealType", meal[0],
+                            "mealType", meal.mealType(),
                             "foods",
                                     List.of(
                                             Map.of(
                                                     "name",
-                                                    meal[2],
+                                                    meal.title(),
                                                     "calories",
-                                                    Integer.parseInt(meal[3]),
+                                                    meal.calories(),
                                                     "carbs",
-                                                    Integer.parseInt(meal[4]),
+                                                    meal.carbohydrateGrams(),
                                                     "protein",
-                                                    Integer.parseInt(meal[5]),
+                                                    meal.proteinGrams(),
                                                     "fat",
-                                                    Integer.parseInt(meal[6]))),
-                            "calories", Integer.parseInt(meal[3]),
-                            "carbohydrateGrams", Integer.parseInt(meal[4]),
-                            "proteinGrams", Integer.parseInt(meal[5]),
-                            "fatGrams", Integer.parseInt(meal[6]));
+                                                    meal.fatGrams())),
+                            "calories", meal.calories(),
+                            "carbohydrateGrams", meal.carbohydrateGrams(),
+                            "proteinGrams", meal.proteinGrams(),
+                            "fatGrams", meal.fatGrams());
             items.save(
                     new ExerciseItem(
                             routine.getId(),
@@ -250,17 +310,17 @@ public class RoutineService {
                             week,
                             date,
                             15,
-                            meal[0],
-                            meal[1] + " 식단",
+                            meal.mealType(),
+                            mealSectionTitle(meal.mealType()),
                             index + 1,
                             "MEAL",
-                            meal[2],
+                            meal.title(),
                             json.writeValueAsString(details),
-                            date.atTime(Integer.parseInt(meal[7]), 0)
+                            date.atTime(mealHour(meal.mealType(), index), 0)
                                     .atZone(ZoneId.of("Asia/Seoul"))
                                     .toInstant(),
                             1,
-                            new BigDecimal(meal[3]),
+                            BigDecimal.valueOf(meal.calories()),
                             ExerciseItem.Unit.KCAL,
                             1,
                             0,
@@ -634,6 +694,318 @@ public class RoutineService {
             throw new ApiException(HttpStatus.BAD_REQUEST, label + "이(가) 올바르지 않습니다.");
         }
     }
+
+    private RoutinePlan routinePlan(
+            AiJob job, JsonNode request, int mealCount, int exerciseDays, String movementType)
+            throws Exception {
+        RoutinePlan plan =
+                llm.live()
+                        ? json.readValue(
+                                llm.routineGeneration(routineInput(job, request)),
+                                RoutinePlan.class)
+                        : defaultPlan(request, mealCount, exerciseDays, movementType);
+        validatePlan(plan, request, mealCount, exerciseDays, movementType);
+        return plan;
+    }
+
+    private String routineInput(AiJob job, JsonNode request) throws Exception {
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("request", request);
+        Analysis analysis =
+                request.hasNonNull("analysisId")
+                        ? analyses.findByIdAndUserId(
+                                        request.path("analysisId").asLong(), job.getUserId())
+                                .orElseThrow()
+                        : analyses.findFirstByUserIdAndStatusOrderByCompletedAtDesc(
+                                        job.getUserId(), Analysis.Status.COMPLETED)
+                                .orElseThrow();
+        JsonNode healthAnalysis = json.readTree(analysis.getDetails());
+        input.put("healthAnalysis", healthAnalysis);
+        JsonNode selectedIds = request.path("selectedRecommendationIds");
+        if (selectedIds.isArray() && !selectedIds.isEmpty()) {
+            Set<String> selected = new HashSet<>();
+            selectedIds.forEach(value -> selected.add(value.asText()));
+            List<JsonNode> selectedRecommendations = new ArrayList<>();
+            healthAnalysis
+                    .path("routineRecommendations")
+                    .forEach(
+                            value -> {
+                                if (selected.contains(value.path("id").asText()))
+                                    selectedRecommendations.add(value);
+                            });
+            input.put("selectedRoutineRecommendations", selectedRecommendations);
+        }
+        profiles.findById(job.getUserId()).ifPresent(p -> input.put("profile", profileInput(p)));
+        if (request.hasNonNull("previousRoutineId")) {
+            List<Map<String, Object>> protectedItems =
+                    items
+                            .findByRoutineIdAndDeletedAtIsNullOrderBySortOrder(
+                                    request.path("previousRoutineId").asLong())
+                            .stream()
+                            .filter(ExerciseItem::isExcludeFromAiAdjustment)
+                            .map(
+                                    item -> {
+                                        Map<String, Object> value = new LinkedHashMap<>();
+                                        value.put("activityType", item.getItemType());
+                                        value.put("title", item.getName());
+                                        value.put("targetValue", item.getTargetValue());
+                                        value.put("targetUnit", item.getTargetUnit());
+                                        return value;
+                                    })
+                            .toList();
+            input.put("protectedItems", protectedItems);
+        }
+        return json.writeValueAsString(input);
+    }
+
+    private Map<String, Object> profileInput(HealthProfile profile) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("birthDate", profile.getBirthDate());
+        result.put("gender", profile.getGender());
+        result.put("heightCm", profile.getHeightCm());
+        result.put("weightKg", profile.getWeightKg());
+        result.put("targetWeightKg", profile.getTargetWeightKg());
+        result.put("activityLevel", profile.getActivityLevel());
+        result.put("availableExerciseMinutes", profile.getAvailableExerciseMinutes());
+        result.put("dietaryPreferences", safeJson(profile.getDietaryPreferences()));
+        result.put("allergies", safeJson(profile.getAllergies()));
+        result.put("dislikedFoods", safeJson(profile.getDislikedFoods()));
+        result.put("goals", safeJson(profile.getGoals()));
+        result.put("injuries", safeJson(profile.getInjuries()));
+        return result;
+    }
+
+    private JsonNode safeJson(String value) {
+        try {
+            return value == null ? json.createArrayNode() : json.readTree(value);
+        } catch (Exception ignored) {
+            return json.createArrayNode();
+        }
+    }
+
+    private void validatePlan(
+            RoutinePlan plan,
+            JsonNode request,
+            int mealCount,
+            int exerciseDays,
+            String requestedMovementType) {
+        if (plan == null
+                || plan.title() == null
+                || plan.title().isBlank()
+                || plan.title().length() > 200
+                || plan.description() == null
+                || plan.description().isBlank())
+            throw new IllegalArgumentException("AI 루틴 제목 또는 설명이 올바르지 않습니다.");
+        LocalDate start = LocalDate.parse(request.path("startDate").asText());
+        int weeks = request.path("durationWeeks").asInt();
+        int totalDays = weeks * 7;
+        List<RoutineDayPlan> days = Optional.ofNullable(plan.days()).orElse(List.of());
+        if (days.size() != totalDays)
+            throw new IllegalArgumentException("AI가 전체 기간의 날짜별 루틴을 반환하지 않았습니다.");
+        Map<LocalDate, RoutineDayPlan> daysByDate = new HashMap<>();
+        for (RoutineDayPlan day : days) {
+            if (day == null
+                    || day.scheduledDate() == null
+                    || daysByDate.put(day.scheduledDate(), day) != null)
+                throw new IllegalArgumentException("AI 루틴 날짜가 없거나 중복되었습니다.");
+        }
+        for (int dayIndex = 0; dayIndex < totalDays; dayIndex++) {
+            LocalDate expectedDate = start.plusDays(dayIndex);
+            RoutineDayPlan day = daysByDate.get(expectedDate);
+            if (day == null) throw new IllegalArgumentException("AI 루틴 날짜가 연속적이지 않습니다.");
+            validateDay(day, mealCount, requestedMovementType);
+        }
+        for (int week = 0; week < weeks; week++) {
+            int exerciseDayCount = 0;
+            for (int offset = 0; offset < 7; offset++) {
+                RoutineDayPlan day = daysByDate.get(start.plusDays((long) week * 7 + offset));
+                if (!safeExercises(day).isEmpty()) exerciseDayCount++;
+            }
+            if (exerciseDayCount != exerciseDays)
+                throw new IllegalArgumentException("AI의 주당 운동일 수가 요청과 일치하지 않습니다.");
+        }
+    }
+
+    private void validateDay(RoutineDayPlan day, int mealCount, String requestedMovementType) {
+        List<MealTemplate> meals = Optional.ofNullable(day.meals()).orElse(List.of());
+        List<ExerciseTemplate> exercises = safeExercises(day);
+        if (meals.size() != mealCount)
+            throw new IllegalArgumentException("AI의 날짜별 식단 수가 요청과 일치하지 않습니다.");
+        for (MealTemplate meal : meals) {
+            if (!Set.of("BREAKFAST", "LUNCH", "DINNER", "SNACK").contains(meal.mealType())
+                    || meal.title() == null
+                    || meal.title().isBlank()
+                    || meal.calories() < 50
+                    || meal.calories() > 3000
+                    || meal.carbohydrateGrams() < 0
+                    || meal.carbohydrateGrams() > 500
+                    || meal.proteinGrams() < 0
+                    || meal.proteinGrams() > 500
+                    || meal.fatGrams() < 0
+                    || meal.fatGrams() > 500)
+                throw new IllegalArgumentException("AI 식단 템플릿 값이 허용 범위를 벗어났습니다.");
+        }
+        if (exercises.size() > 30) throw new IllegalArgumentException("AI 운동 항목 수가 너무 많습니다.");
+        if (!exercises.isEmpty()) {
+            Set<String> sections = new HashSet<>();
+            exercises.forEach(exercise -> sections.add(exercise.sectionType()));
+            if (!sections.containsAll(Set.of("WARM_UP", "MAIN_EXERCISE", "COOL_DOWN")))
+                throw new IllegalArgumentException("AI 운동일에 준비·본·마무리 운동이 모두 필요합니다.");
+            if ("REHABILITATION".equals(requestedMovementType)
+                    && exercises.stream()
+                            .noneMatch(
+                                    exercise -> "REHABILITATION".equals(exercise.activityType())))
+                throw new IllegalArgumentException("재활 루틴에 재활 활동이 포함되지 않았습니다.");
+        }
+        for (ExerciseTemplate exercise : exercises) {
+            if (!Set.of("EXERCISE", "REHABILITATION").contains(exercise.activityType())
+                    || !Set.of("WARM_UP", "MAIN_EXERCISE", "COOL_DOWN")
+                            .contains(exercise.sectionType())
+                    || !Set.of("SECONDS", "MINUTES", "REPETITIONS", "METERS", "KILOMETERS")
+                            .contains(exercise.targetUnit())
+                    || exercise.title() == null
+                    || exercise.title().isBlank()
+                    || exercise.targetValue() <= 0
+                    || exercise.targetValue() > 10000
+                    || exercise.sets() < 1
+                    || exercise.sets() > 10
+                    || exercise.restSeconds() < 0
+                    || exercise.restSeconds() > 600
+                    || exercise.estimatedMinutes() < 1
+                    || exercise.estimatedMinutes() > 180)
+                throw new IllegalArgumentException("AI 운동 프로그램 값이 허용 범위를 벗어났습니다.");
+        }
+    }
+
+    private List<ExerciseTemplate> safeExercises(RoutineDayPlan day) {
+        return Optional.ofNullable(day.exerciseItems()).orElse(List.of());
+    }
+
+    private RoutinePlan defaultPlan(
+            JsonNode request, int mealCount, int exerciseDays, String movementType) {
+        List<MealTemplate> mealCatalog =
+                List.of(
+                        new MealTemplate("BREAKFAST", "그릭요거트볼", 420, 38, 26, 12),
+                        new MealTemplate("LUNCH", "현미밥과 닭가슴살", 610, 82, 41, 18),
+                        new MealTemplate("DINNER", "연어구이와 샐러드", 510, 32, 41, 18),
+                        new MealTemplate("SNACK", "견과류와 과일", 220, 25, 8, 10),
+                        new MealTemplate("SNACK", "단백질 요거트", 180, 18, 20, 4),
+                        new MealTemplate("SNACK", "바나나", 110, 28, 1, 0));
+        LocalDate start = LocalDate.parse(request.path("startDate").asText());
+        int totalDays = request.path("durationWeeks").asInt() * 7;
+        List<RoutineDayPlan> days = new ArrayList<>();
+        int exerciseSession = 0;
+        for (int dayIndex = 0; dayIndex < totalDays; dayIndex++) {
+            List<MealTemplate> meals = new ArrayList<>();
+            for (int mealIndex = 0; mealIndex < mealCount; mealIndex++)
+                meals.add(mealCatalog.get((dayIndex + mealIndex) % mealCatalog.size()));
+            List<ExerciseTemplate> exercises =
+                    dayIndex % 7 < exerciseDays
+                            ? defaultExerciseDay(movementType, exerciseSession++)
+                            : List.of();
+            days.add(new RoutineDayPlan(start.plusDays(dayIndex), meals, exercises));
+        }
+        return new RoutinePlan("맞춤 웰니스 루틴", "개인 제약을 반영한 맞춤 웰니스 루틴입니다.", days, List.of());
+    }
+
+    private List<ExerciseTemplate> defaultExerciseDay(String movementType, int session) {
+        String[] warmups = {"제자리 걷기", "어깨 돌리기", "고양이 소 자세"};
+        String[][] mainExercises = {
+            {"복부 크런치", "버드독", "글루트 브리지"},
+            {"의자 스쿼트", "벽 밀기", "사이드 레그레이즈"},
+            {"데드버그", "무릎 플랭크", "힙 힌지"}
+        };
+        String[] cooldowns = {"어린이 자세", "햄스트링 스트레칭", "누운 허리 회전"};
+        int variant = session % mainExercises.length;
+        List<ExerciseTemplate> result = new ArrayList<>();
+        result.add(
+                new ExerciseTemplate(
+                        movementType,
+                        "WARM_UP",
+                        "준비 운동",
+                        warmups[variant],
+                        30,
+                        "SECONDS",
+                        1,
+                        0,
+                        3));
+        for (String title : mainExercises[variant])
+            result.add(
+                    new ExerciseTemplate(
+                            movementType,
+                            "MAIN_EXERCISE",
+                            switch (variant) {
+                                case 0 -> "코어 안정화";
+                                case 1 -> "하체와 상체 기초 근력";
+                                default -> "전신 균형과 가동성";
+                            },
+                            title,
+                            12 + session / 3 * 2,
+                            "REPETITIONS",
+                            2,
+                            30,
+                            5));
+        result.add(
+                new ExerciseTemplate(
+                        movementType,
+                        "COOL_DOWN",
+                        "마무리 스트레칭",
+                        cooldowns[variant],
+                        30,
+                        "SECONDS",
+                        1,
+                        0,
+                        3));
+        return result;
+    }
+
+    private String mealSectionTitle(String mealType) {
+        return switch (mealType) {
+            case "BREAKFAST" -> "아침 식단";
+            case "LUNCH" -> "점심 식단";
+            case "DINNER" -> "저녁 식단";
+            default -> "간식";
+        };
+    }
+
+    private int mealHour(String mealType, int index) {
+        return switch (mealType) {
+            case "BREAKFAST" -> 7;
+            case "LUNCH" -> 12;
+            case "DINNER" -> 18;
+            default -> Math.min(23, 15 + index);
+        };
+    }
+
+    public record RoutinePlan(
+            String title,
+            String description,
+            List<RoutineDayPlan> days,
+            List<String> safetyNotes) {}
+
+    public record RoutineDayPlan(
+            LocalDate scheduledDate,
+            List<MealTemplate> meals,
+            List<ExerciseTemplate> exerciseItems) {}
+
+    public record MealTemplate(
+            String mealType,
+            String title,
+            int calories,
+            int carbohydrateGrams,
+            int proteinGrams,
+            int fatGrams) {}
+
+    public record ExerciseTemplate(
+            String activityType,
+            String sectionType,
+            String sectionTitle,
+            String title,
+            double targetValue,
+            String targetUnit,
+            int sets,
+            int restSeconds,
+            int estimatedMinutes) {}
 
     public AiJob generation(Long id) {
         return jobs.findByIdAndUserId(id, auth.active().getId())

@@ -41,8 +41,17 @@ public class RoutineController {
         m.put("generationId", j.getId());
         m.put("status", j.getStatus());
         m.put("routineId", j.getResultId());
+        m.put("failureReason", j.getFailureReason());
+        m.put("modelVersion", j.getModelVersion());
+        m.put("promptVersion", j.getPromptVersion());
         return ApiResponse.success(
-                200, j.getStatus() == AiJob.Status.COMPLETED ? "맞춤 루틴 생성 완료" : "맞춤 루틴 생성 진행 중", m);
+                200,
+                switch (j.getStatus()) {
+                    case COMPLETED -> "맞춤 루틴 생성 완료";
+                    case FAILED -> "맞춤 루틴 생성 실패";
+                    default -> "맞춤 루틴 생성 진행 중";
+                },
+                m);
     }
 
     @GetMapping

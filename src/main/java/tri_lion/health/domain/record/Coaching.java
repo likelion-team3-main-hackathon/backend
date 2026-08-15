@@ -38,13 +38,17 @@ public class Coaching {
     private Instant createdAt;
 
     public Coaching(Long u, Long record, String message) {
+        this(u, record, message, "NORMAL");
+    }
+
+    public Coaching(Long u, Long record, String message, String safetyLevel) {
         userId = u;
         triggerRecordId = record;
         type = "AFTER_RECORD";
         title = "오늘 기록을 잘 남겼어요";
         this.message = message;
         actions = "[]";
-        safetyLevel = "NORMAL";
+        this.safetyLevel = safetyLevel;
         disclaimer = "통증이 지속되거나 심해지면 의료 전문가와 상담하세요.";
         createdAt = Instant.now();
     }

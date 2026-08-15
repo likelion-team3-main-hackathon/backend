@@ -16,7 +16,6 @@ import tri_lion.health.domain.routine.Routine;
 import tri_lion.health.dto.request.record.RecordBatchRequest;
 import tri_lion.health.dto.request.record.RecordRequest;
 import tri_lion.health.exception.ApiException;
-import tri_lion.health.external.ai.AiClients;
 import tri_lion.health.external.storage.ObjectStorage;
 import tri_lion.health.repository.health.HealthRepositories;
 import tri_lion.health.repository.record.RecordRepositories;
@@ -32,7 +31,6 @@ public class RecordService {
     private final HealthRepositories.Jobs jobs;
     private final AuthenticatedUser auth;
     private final ObjectMapper json;
-    private final AiClients.LlmClient llm;
     private final ObjectStorage storage;
     private final JdbcTemplate db;
 
@@ -44,7 +42,6 @@ public class RecordService {
             HealthRepositories.Jobs j,
             AuthenticatedUser a,
             ObjectMapper o,
-            AiClients.LlmClient l,
             ObjectStorage storage,
             JdbcTemplate db) {
         records = r;
@@ -54,7 +51,6 @@ public class RecordService {
         jobs = j;
         auth = a;
         json = o;
-        llm = l;
         this.storage = storage;
         this.db = db;
     }
@@ -238,9 +234,15 @@ public class RecordService {
     }
 
     @Transactional
-    public void coach(AiJob job) {
-        coachings.save(
-                new Coaching(
-                        job.getUserId(), job.getResultId(), llm.coaching(job.getRequestJson())));
+    public void saveCoaching(
+            Long jobId,
+            Long userId,
+            Long recordId,
+            String message,
+            String safetyLevel,
+            String modelVersion) {
+        coachings.save(new Coaching(userId, recordId, message, safetyLevel));
+        AiJob job = jobs.findForUpdateById(jobId).orElseThrow();
+        job.complete(modelVersion, "coaching-v2");
     }
 }
