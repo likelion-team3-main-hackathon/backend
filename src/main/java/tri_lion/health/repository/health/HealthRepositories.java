@@ -38,6 +38,9 @@ public final class HealthRepositories {
 
         Optional<AiJob> findByUserIdAndTypeAndIdempotencyKey(Long u, AiJob.Type t, String key);
 
+        Optional<AiJob> findFirstByUserIdAndTypeAndStatusInOrderByCreatedAtDesc(
+                Long userId, AiJob.Type type, Collection<AiJob.Status> statuses);
+
         Optional<AiJob> findByIdAndUserId(Long id, Long user);
 
         @Lock(LockModeType.PESSIMISTIC_WRITE)

@@ -55,6 +55,12 @@ public class AiJobTransactions {
         return job.getStatus();
     }
 
+    @Transactional
+    public void fail(JobSnapshot snapshot, String reason) {
+        AiJob job = jobs.findForUpdateById(snapshot.id()).orElseThrow();
+        job.fail(reason);
+    }
+
     public record JobSnapshot(
             Long id, Long userId, AiJob.Type type, String requestJson, Long resultId) {
         static JobSnapshot from(AiJob job) {

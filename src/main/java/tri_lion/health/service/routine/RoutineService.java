@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.*;
 import java.math.BigDecimal;
 import java.time.*;
 import java.util.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.*;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -19,9 +21,11 @@ import tri_lion.health.repository.routine.RoutineRepositories;
 import tri_lion.health.repository.user.UserRepositories;
 import tri_lion.health.security.AuthenticatedUser;
 import tri_lion.health.service.health.AiJobTransactions;
+import tri_lion.health.service.health.AiRequestLimitService;
 
 @Service
 public class RoutineService {
+    private static final Logger log = LoggerFactory.getLogger(RoutineService.class);
     private final RoutineRepositories.Routines routines;
     private final RoutineRepositories.Items items;
     private final HealthRepositories.Analyses analyses;
@@ -30,6 +34,7 @@ public class RoutineService {
     private final AuthenticatedUser auth;
     private final ObjectMapper json;
     private final AiClients.LlmClient llm;
+    private final AiRequestLimitService limits;
 
     public RoutineService(
             RoutineRepositories.Routines r,
@@ -39,7 +44,8 @@ public class RoutineService {
             UserRepositories.Profiles p,
             AuthenticatedUser u,
             ObjectMapper o,
-            AiClients.LlmClient llm) {
+            AiClients.LlmClient llm,
+            AiRequestLimitService limits) {
         routines = r;
         items = i;
         analyses = a;
@@ -48,6 +54,7 @@ public class RoutineService {
         auth = u;
         json = o;
         this.llm = llm;
+        this.limits = limits;
     }
 
     @Transactional
@@ -64,12 +71,23 @@ public class RoutineService {
                                                 HttpStatus.UNPROCESSABLE_ENTITY,
                                                 "루틴 생성에 필요한 온보딩 또는 건강 분석 정보가 부족합니다."));
         validateRecommendationSelection(req, a);
+        limits.lockJobCreation();
         if (key != null) {
             var old =
                     jobs.findByUserIdAndTypeAndIdempotencyKey(
                             uid, AiJob.Type.ROUTINE_GENERATION, key);
             if (old.isPresent()) return old.get();
         }
+        var active =
+                jobs.findFirstByUserIdAndTypeAndStatusInOrderByCreatedAtDesc(
+                        uid,
+                        AiJob.Type.ROUTINE_GENERATION,
+                        List.of(
+                                AiJob.Status.PENDING,
+                                AiJob.Status.PROCESSING,
+                                AiJob.Status.RETRYING));
+        if (active.isPresent()) return active.get();
+        limits.authorizeJob(uid, AiJob.Type.ROUTINE_GENERATION);
         try {
             return jobs.save(
                     new AiJob(
@@ -112,15 +130,16 @@ public class RoutineService {
                             : mealCount > 0 ? Routine.Type.MEAL : Routine.Type.EXERCISE;
             String title = previous != null ? "재조정 " + plan.title() : plan.title();
             Routine r =
-                    routines.save(
-                            new Routine(
-                                    job.getUserId(),
-                                    title,
-                                    plan.description(),
-                                    start,
-                                    weeks,
-                                    previous,
-                                    routineType));
+                    new Routine(
+                            job.getUserId(),
+                            title,
+                            plan.description(),
+                            start,
+                            weeks,
+                            previous,
+                            routineType);
+            r.dailySummaries(dailySummariesJson(plan));
+            r = routines.save(r);
             List<RoutineDayPlan> plannedDays =
                     plan.days().stream()
                             .sorted(Comparator.comparing(RoutineDayPlan::scheduledDate))
@@ -169,7 +188,7 @@ public class RoutineService {
             }
             AiJob persistedJob = jobs.findForUpdateById(snapshot.id()).orElseThrow();
             persistedJob.result(r.getId());
-            persistedJob.complete(llm.routineModelVersion(), "routine-v4-selected-plan");
+            persistedJob.complete(llm.routineModelVersion(), llm.routinePromptVersion());
             return r.getId();
         } catch (Exception e) {
             throw new IllegalStateException(e);
@@ -330,6 +349,7 @@ public class RoutineService {
     private RoutinePlan routinePlan(
             AiJob job, JsonNode request, int mealCount, int exerciseDays, String movementType)
             throws Exception {
+        if (llm.live()) limits.reserveExternalCall(job.getUserId(), job.getType());
         RoutinePlan plan =
                 llm.live()
                         ? json.readValue(
@@ -390,6 +410,17 @@ public class RoutineService {
         return json.writeValueAsString(input);
     }
 
+    private String dailySummariesJson(RoutinePlan plan) throws Exception {
+        var root = json.createObjectNode();
+        for (RoutineDayPlan day : plan.days()) {
+            var summary = root.putObject(day.scheduledDate().toString());
+            summary.put("mealTitle", Optional.ofNullable(day.mealSummaryTitle()).orElse(""));
+            summary.put(
+                    "exerciseTitle", Optional.ofNullable(day.exerciseSummaryTitle()).orElse(""));
+        }
+        return json.writeValueAsString(root);
+    }
+
     private Map<String, Object> profileInput(HealthProfile profile) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("birthDate", profile.getBirthDate());
@@ -432,8 +463,29 @@ public class RoutineService {
         int weeks = request.path("durationWeeks").asInt();
         int totalDays = weeks * 7;
         List<RoutineDayPlan> days = Optional.ofNullable(plan.days()).orElse(List.of());
-        if (days.size() != totalDays)
-            throw new IllegalArgumentException("AI가 전체 기간의 날짜별 루틴을 반환하지 않았습니다.");
+        if (days.size() != totalDays) {
+            List<LocalDate> returnedDates =
+                    days.stream()
+                            .filter(Objects::nonNull)
+                            .map(RoutineDayPlan::scheduledDate)
+                            .filter(Objects::nonNull)
+                            .sorted()
+                            .toList();
+            log.warn(
+                    "AI routine day count mismatch: expectedDays={}, actualDays={}, expectedStart={}, expectedEnd={}, returnedFirst={}, returnedLast={}",
+                    totalDays,
+                    days.size(),
+                    start,
+                    start.plusDays(totalDays - 1L),
+                    returnedDates.isEmpty() ? null : returnedDates.getFirst(),
+                    returnedDates.isEmpty() ? null : returnedDates.getLast());
+            throw new IllegalArgumentException(
+                    "AI가 전체 기간의 날짜별 루틴을 반환하지 않았습니다. (기대: "
+                            + totalDays
+                            + "일, 반환: "
+                            + days.size()
+                            + "일)");
+        }
         Map<LocalDate, RoutineDayPlan> daysByDate = new HashMap<>();
         for (RoutineDayPlan day : days) {
             if (day == null
@@ -463,6 +515,16 @@ public class RoutineService {
         List<ExerciseTemplate> exercises = safeExercises(day);
         if (meals.size() != mealCount)
             throw new IllegalArgumentException("AI의 날짜별 식단 수가 요청과 일치하지 않습니다.");
+        validateDaySummary(
+                day.mealSummaryTitle(),
+                !meals.isEmpty(),
+                Set.of("식단", "식단 루틴", "맞춤 식단", "아침 식단", "점심 식단", "저녁 식단"),
+                "식단");
+        validateDaySummary(
+                day.exerciseSummaryTitle(),
+                !exercises.isEmpty(),
+                Set.of("운동", "운동 루틴", "본 운동", "본운동", "맞춤 운동"),
+                "운동");
         for (MealTemplate meal : meals) {
             if (!Set.of("BREAKFAST", "LUNCH", "DINNER", "SNACK").contains(meal.mealType())
                     || meal.title() == null
@@ -509,6 +571,20 @@ public class RoutineService {
         }
     }
 
+    private void validateDaySummary(
+            String title, boolean required, Set<String> genericTitles, String type) {
+        if (!required) {
+            if (title != null && !title.isBlank())
+                throw new IllegalArgumentException("AI가 " + type + " 없는 날에 요약 제목을 반환했습니다.");
+            return;
+        }
+        if (title == null
+                || title.isBlank()
+                || title.length() > 100
+                || genericTitles.contains(title.trim()))
+            throw new IllegalArgumentException("AI의 날짜별 " + type + " 요약 제목이 올바르지 않습니다.");
+    }
+
     private List<ExerciseTemplate> safeExercises(RoutineDayPlan day) {
         return Optional.ofNullable(day.exerciseItems()).orElse(List.of());
     }
@@ -535,7 +611,20 @@ public class RoutineService {
                     dayIndex % 7 < exerciseDays
                             ? defaultExerciseDay(movementType, exerciseSession++)
                             : List.of();
-            days.add(new RoutineDayPlan(start.plusDays(dayIndex), meals, exercises));
+            String mealSummary = meals.isEmpty() ? "" : "단백질과 영양 균형을 맞춘 식단";
+            String exerciseSummary =
+                    exercises.stream()
+                            .filter(exercise -> "MAIN_EXERCISE".equals(exercise.sectionType()))
+                            .map(ExerciseTemplate::sectionTitle)
+                            .findFirst()
+                            .orElse("");
+            days.add(
+                    new RoutineDayPlan(
+                            start.plusDays(dayIndex),
+                            mealSummary,
+                            exerciseSummary,
+                            meals,
+                            exercises));
         }
         return new RoutinePlan("맞춤 웰니스 루틴", "개인 제약을 반영한 맞춤 웰니스 루틴입니다.", days, List.of());
     }
@@ -617,6 +706,8 @@ public class RoutineService {
 
     public record RoutineDayPlan(
             LocalDate scheduledDate,
+            String mealSummaryTitle,
+            String exerciseSummaryTitle,
             List<MealTemplate> meals,
             List<ExerciseTemplate> exerciseItems) {}
 
@@ -678,11 +769,27 @@ public class RoutineService {
                         byDate.computeIfAbsent(
                                         item.getScheduledDate(), ignored -> new ArrayList<>())
                                 .add(item));
+        JsonNode dailySummaries = parseDailySummaries(r.getDailySummaries());
         List<DayView> dayViews =
                 byDate.entrySet().stream()
-                        .map(entry -> dayView(entry.getKey(), entry.getValue()))
+                        .map(
+                                entry ->
+                                        dayView(
+                                                entry.getKey(),
+                                                entry.getValue(),
+                                                dailySummaries.path(entry.getKey().toString())))
                         .toList();
         return new Detail(r, dayViews);
+    }
+
+    private JsonNode parseDailySummaries(String value) {
+        try {
+            return value == null || value.isBlank()
+                    ? json.createObjectNode()
+                    : json.readTree(value);
+        } catch (Exception ignored) {
+            return json.createObjectNode();
+        }
     }
 
     @Transactional
@@ -786,6 +893,23 @@ public class RoutineService {
     public AiJob adjust(Long routineId, RoutineRequests.AdjustmentRequest req, String key) {
         Routine old = owned(routineId);
         if (!old.isAiAdjustmentAllowed()) throw ApiException.conflict("AI 재조정이 허용되지 않은 루틴입니다.");
+        limits.lockJobCreation();
+        if (key != null) {
+            var existing =
+                    jobs.findByUserIdAndTypeAndIdempotencyKey(
+                            old.getUserId(), AiJob.Type.ROUTINE_ADJUSTMENT, key);
+            if (existing.isPresent()) return existing.get();
+        }
+        var active =
+                jobs.findFirstByUserIdAndTypeAndStatusInOrderByCreatedAtDesc(
+                        old.getUserId(),
+                        AiJob.Type.ROUTINE_ADJUSTMENT,
+                        List.of(
+                                AiJob.Status.PENDING,
+                                AiJob.Status.PROCESSING,
+                                AiJob.Status.RETRYING));
+        if (active.isPresent()) return active.get();
+        limits.authorizeJob(old.getUserId(), AiJob.Type.ROUTINE_ADJUSTMENT);
         try {
             String payload =
                     json.writeValueAsString(
@@ -818,7 +942,7 @@ public class RoutineService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "영상 URL은 HTTPS만 허용합니다.");
     }
 
-    private DayView dayView(LocalDate date, List<ExerciseItem> dayItems) {
+    private DayView dayView(LocalDate date, List<ExerciseItem> dayItems, JsonNode summary) {
         ExerciseItem first = dayItems.getFirst();
         Map<Long, List<ExerciseItem>> bySection = new LinkedHashMap<>();
         dayItems.forEach(
@@ -845,7 +969,14 @@ public class RoutineService {
                 first.getWeek(),
                 date,
                 first.getEstimatedMinutes(),
+                nullableText(summary, "mealTitle"),
+                nullableText(summary, "exerciseTitle"),
                 sectionViews);
+    }
+
+    private String nullableText(JsonNode node, String field) {
+        String value = node.path(field).asText("").trim();
+        return value.isEmpty() ? null : value;
     }
 
     public record Detail(Routine routine, List<DayView> days) {}
@@ -856,6 +987,8 @@ public class RoutineService {
             int week,
             LocalDate scheduledDate,
             Integer estimatedMinutes,
+            String mealSummaryTitle,
+            String exerciseSummaryTitle,
             List<SectionView> sections) {}
 
     public record SectionView(

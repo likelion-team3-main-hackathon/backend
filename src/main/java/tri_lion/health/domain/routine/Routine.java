@@ -3,6 +3,8 @@ package tri_lion.health.domain.routine;
 import jakarta.persistence.*;
 import java.time.*;
 import lombok.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "personalized_routines")
@@ -25,6 +27,11 @@ public class Routine {
 
     private String title;
     private String description;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "daily_summaries")
+    private String dailySummaries;
+
     private String goal;
 
     @Enumerated(EnumType.STRING)
@@ -104,6 +111,11 @@ public class Routine {
         if (allowed != null) aiAdjustmentAllowed = allowed;
         if (status != null) this.status = Status.valueOf(status);
         lastModifiedBy = Editor.USER;
+        updatedAt = Instant.now();
+    }
+
+    public void dailySummaries(String summaries) {
+        dailySummaries = summaries;
         updatedAt = Instant.now();
     }
 

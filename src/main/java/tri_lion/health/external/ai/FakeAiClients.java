@@ -12,24 +12,37 @@ public class FakeAiClients {
 
     @Bean
     AiClients.OcrClient ocr() {
-        return documents -> {
-            ObjectNode root = json.createObjectNode();
-            var results = root.putArray("documents");
-            documents.forEach(
-                    document -> {
-                        ObjectNode item = results.addObject();
-                        item.put("documentId", document.documentId());
-                        item.put(
-                                "documentType",
-                                document.documentType() == null
-                                        ? "OTHER"
-                                        : document.documentType());
-                        item.putNull("measuredDate");
-                        item.putArray("measurements");
-                        item.putArray("keyFacts");
-                        item.putArray("unreadableFields");
-                    });
-            return root.toString();
+        return new AiClients.OcrClient() {
+            @Override
+            public String extract(java.util.List<AiClients.DocumentInput> documents) {
+                ObjectNode root = json.createObjectNode();
+                var results = root.putArray("documents");
+                documents.forEach(
+                        document -> {
+                            ObjectNode item = results.addObject();
+                            item.put("documentId", document.documentId());
+                            item.put(
+                                    "documentType",
+                                    document.documentType() == null
+                                            ? "OTHER"
+                                            : document.documentType());
+                            item.putNull("measuredDate");
+                            item.putArray("measurements");
+                            item.putArray("keyFacts");
+                            item.putArray("unreadableFields");
+                        });
+                return root.toString();
+            }
+
+            @Override
+            public String modelVersion() {
+                return "fake-v1";
+            }
+
+            @Override
+            public String promptVersion() {
+                return "fake-document-v1";
+            }
         };
     }
 
@@ -125,6 +138,36 @@ public class FakeAiClients {
 
             public AiClients.CoachingResult coaching(String i) {
                 return new AiClients.CoachingResult("기록을 잘 남겼어요. 무리하지 말고 현재 강도를 유지하세요.", "NORMAL");
+            }
+
+            @Override
+            public String analysisModelVersion() {
+                return "fake-v1";
+            }
+
+            @Override
+            public String routineModelVersion() {
+                return "fake-v1";
+            }
+
+            @Override
+            public String coachingModelVersion() {
+                return "fake-v1";
+            }
+
+            @Override
+            public String analysisPromptVersion() {
+                return "fake-health-v1";
+            }
+
+            @Override
+            public String routinePromptVersion() {
+                return "fake-routine-v1";
+            }
+
+            @Override
+            public String coachingPromptVersion() {
+                return "fake-coaching-v1";
             }
         };
     }

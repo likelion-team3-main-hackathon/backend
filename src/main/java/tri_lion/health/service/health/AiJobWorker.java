@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import tri_lion.health.domain.health.AiJob;
+import tri_lion.health.exception.RateLimitExceededException;
 import tri_lion.health.external.ai.AiClients;
 import tri_lion.health.service.record.RecordService;
 import tri_lion.health.service.routine.RoutineService;
@@ -21,6 +22,7 @@ public class AiJobWorker {
     private final ObjectMapper json;
     private final RoutineService routines;
     private final RecordService records;
+    private final AiRequestLimitService limits;
 
     public AiJobWorker(
             AiJobTransactions transactions,
@@ -29,7 +31,8 @@ public class AiJobWorker {
             AiClients.LlmClient llm,
             ObjectMapper json,
             RoutineService routines,
-            RecordService records) {
+            RecordService records,
+            AiRequestLimitService limits) {
         this.transactions = transactions;
         this.healthTasks = healthTasks;
         this.ocr = ocr;
@@ -37,6 +40,7 @@ public class AiJobWorker {
         this.json = json;
         this.routines = routines;
         this.records = records;
+        this.limits = limits;
     }
 
     @Scheduled(fixedDelayString = "${app.worker.delay-ms:500}")
@@ -53,12 +57,20 @@ public class AiJobWorker {
                 case CONTENT_PERSONALIZATION ->
                         throw new UnsupportedOperationException("콘텐츠 개인화는 아직 지원하지 않습니다.");
             }
+        } catch (RateLimitExceededException exception) {
+            String reason = exception.getMessage();
+            log.warn(
+                    "AI job stopped by internal request limit: id={}, type={}",
+                    job.id(),
+                    job.type());
+            transactions.fail(job, reason);
+            if (job.type() == AiJob.Type.HEALTH_ANALYSIS) healthTasks.fail(job, reason);
         } catch (Exception exception) {
             String reason = failureReason(exception);
             log.warn("AI job failed: id={}, type={}, reason={}", job.id(), job.type(), reason);
             AiJob.Status status = transactions.retry(job, reason);
             if (status == AiJob.Status.FAILED && job.type() == AiJob.Type.HEALTH_ANALYSIS)
-                healthTasks.fail(job, "AI 건강 분석을 완료하지 못했습니다.");
+                healthTasks.fail(job, reason);
         }
     }
 
@@ -79,14 +91,22 @@ public class AiJobWorker {
 
     private void processHealth(AiJobTransactions.JobSnapshot job) throws Exception {
         HealthAiTaskService.PreparedHealthTask task = healthTasks.prepare(job);
+        if (llm.live()) limits.reserveExternalCall(job.userId(), job.type());
         String extracted = ocr.extract(task.documents());
         validateExtraction(extracted, task.documentIds());
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("documents", json.readTree(maskDirectIdentifiers(extracted)).path("documents"));
         input.put("profile", task.profile());
+        if (llm.live()) limits.reserveExternalCall(job.userId(), job.type());
         String result = llm.healthAnalysis(json.writeValueAsString(input));
         String summary = validateHealthAnalysis(result, task.documentIds());
-        healthTasks.complete(job, task.documentIds(), summary, result, llm.analysisModelVersion());
+        healthTasks.complete(
+                job,
+                task.documentIds(),
+                summary,
+                result,
+                llm.analysisModelVersion(),
+                ocr.promptVersion() + "+" + llm.analysisPromptVersion());
     }
 
     private void processRoutine(AiJobTransactions.JobSnapshot job) throws Exception {
@@ -96,6 +116,7 @@ public class AiJobWorker {
     }
 
     private void processCoaching(AiJobTransactions.JobSnapshot job) {
+        if (llm.live()) limits.reserveExternalCall(job.userId(), job.type());
         AiClients.CoachingResult coaching = llm.coaching(job.requestJson());
         records.saveCoaching(
                 job.id(),
@@ -103,7 +124,8 @@ public class AiJobWorker {
                 job.resultId(),
                 coaching.message(),
                 coaching.safetyLevel(),
-                llm.coachingModelVersion());
+                llm.coachingModelVersion(),
+                llm.coachingPromptVersion());
     }
 
     private void validateExtraction(String extracted, List<Long> expectedIds) throws Exception {

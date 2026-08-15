@@ -1,6 +1,7 @@
 package tri_lion.health.exception;
 
 import jakarta.validation.ConstraintViolationException;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -12,6 +13,13 @@ import tri_lion.health.common.response.ApiResponse;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    @ExceptionHandler(RateLimitExceededException.class)
+    ResponseEntity<ApiResponse<Void>> rateLimit(RateLimitExceededException e) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, Long.toString(e.retryAfterSeconds()))
+                .body(ApiResponse.error(429, e.getMessage(), null));
+    }
+
     @ExceptionHandler(ApiException.class)
     ResponseEntity<ApiResponse<Void>> api(ApiException e) {
         return ResponseEntity.status(e.status())

@@ -3,6 +3,8 @@ package tri_lion.health.service.record;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.*;
 import java.util.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.*;
@@ -13,14 +15,17 @@ import tri_lion.health.domain.routine.ExerciseItem;
 import tri_lion.health.dto.request.record.RecordBatchRequest;
 import tri_lion.health.dto.request.record.RecordRequest;
 import tri_lion.health.exception.ApiException;
+import tri_lion.health.exception.RateLimitExceededException;
 import tri_lion.health.external.storage.ObjectStorage;
 import tri_lion.health.repository.health.HealthRepositories;
 import tri_lion.health.repository.record.RecordRepositories;
 import tri_lion.health.repository.routine.RoutineRepositories;
 import tri_lion.health.security.AuthenticatedUser;
+import tri_lion.health.service.health.AiRequestLimitService;
 
 @Service
 public class RecordService {
+    private static final Logger log = LoggerFactory.getLogger(RecordService.class);
     private final RecordRepositories.Records records;
     private final RecordRepositories.Coachings coachings;
     private final RoutineRepositories.Items items;
@@ -29,6 +34,7 @@ public class RecordService {
     private final AuthenticatedUser auth;
     private final ObjectMapper json;
     private final ObjectStorage storage;
+    private final AiRequestLimitService limits;
 
     public RecordService(
             RecordRepositories.Records r,
@@ -38,7 +44,8 @@ public class RecordService {
             HealthRepositories.Jobs j,
             AuthenticatedUser a,
             ObjectMapper o,
-            ObjectStorage storage) {
+            ObjectStorage storage,
+            AiRequestLimitService limits) {
         records = r;
         coachings = c;
         items = i;
@@ -47,6 +54,7 @@ public class RecordService {
         auth = a;
         json = o;
         this.storage = storage;
+        this.limits = limits;
     }
 
     @Transactional
@@ -147,6 +155,7 @@ public class RecordService {
 
     private void createCoachingJob(Long uid, ActivityRecord record, Map<String, Object> request) {
         try {
+            limits.authorizeJob(uid, AiJob.Type.RECORD_COACHING);
             jobs.save(
                     new AiJob(
                             uid,
@@ -154,6 +163,11 @@ public class RecordService {
                             json.writeValueAsString(request),
                             record.getId(),
                             "record-" + record.getId()));
+        } catch (RateLimitExceededException exception) {
+            log.info(
+                    "AI coaching skipped by request limit: userId={}, recordId={}",
+                    uid,
+                    record.getId());
         } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
             throw new IllegalArgumentException(exception);
         }
@@ -194,9 +208,10 @@ public class RecordService {
             Long recordId,
             String message,
             String safetyLevel,
-            String modelVersion) {
+            String modelVersion,
+            String promptVersion) {
         coachings.save(new Coaching(userId, recordId, message, safetyLevel));
         AiJob job = jobs.findForUpdateById(jobId).orElseThrow();
-        job.complete(modelVersion, "coaching-v2");
+        job.complete(modelVersion, promptVersion);
     }
 }

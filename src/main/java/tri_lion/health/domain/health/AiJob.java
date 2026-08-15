@@ -104,6 +104,13 @@ public class AiJob {
         updatedAt = Instant.now();
     }
 
+    public void fail(String reason) {
+        failureReason = reason;
+        status = Status.FAILED;
+        nextAttemptAt = null;
+        updatedAt = Instant.now();
+    }
+
     public enum Type {
         HEALTH_ANALYSIS,
         ROUTINE_GENERATION,

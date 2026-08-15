@@ -27,7 +27,7 @@ class GeminiAiClientsTests {
                         .defaultHeader("x-goog-api-key", "test-key");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         GeminiAiClients.GeminiGateway gateway =
-                new GeminiAiClients.GeminiGateway(builder.build(), new ObjectMapper());
+                new GeminiAiClients.GeminiGateway(builder.build(), new ObjectMapper(), false);
         server.expect(requestTo("https://gemini.test/v1beta/models/test-model:generateContent"))
                 .andExpect(method(org.springframework.http.HttpMethod.POST))
                 .andExpect(header("x-goog-api-key", "test-key"))
