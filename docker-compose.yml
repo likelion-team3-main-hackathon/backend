@@ -18,6 +18,8 @@ services:
       REFRESH_COOKIE_SECURE: ${REFRESH_COOKIE_SECURE:-false}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN}
       JAVA_OPTS: ${JAVA_OPTS}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash-lite}
     depends_on:
       mysql: { condition: service_healthy }
       redis: { condition: service_healthy }

@@ -164,18 +164,164 @@ public class ExpansionService {
                 "select provider_name partner,market_item_id externalProductId,name,price,image_url imageUrl,purchase_url purchaseUrl from market_items where item_type='MEAL' and status='ACTIVE'");
     }
 
-    public Map<String, Object> cart(String partner, List<Map<String, Object>> items) {
-        auth.active();
+    @Transactional(readOnly = true)
+    public void validateCart(
+            Long routineId, String partner, List<Map<String, Object>> requestedItems) {
+        Long userId = auth.active().getId();
+        validateRoutineOwner(userId, routineId);
+        normalizeCartItems(partner, requestedItems);
+    }
+
+    @Transactional
+    public Map<String, Object> cart(
+            Long routineId, String partner, List<Map<String, Object>> requestedItems) {
+        Long userId = auth.active().getId();
+        validateRoutineOwner(userId, routineId);
+        List<Map<String, Object>> items = normalizeCartItems(partner, requestedItems);
+        Instant createdAt = Instant.now();
+        Instant expiresAt = createdAt.plusSeconds(1800);
+        String checkoutUrl = "https://partner.example.com/deep-link";
+
+        KeyHolder key = new GeneratedKeyHolder();
+        db.update(
+                connection -> {
+                    var statement =
+                            connection.prepareStatement(
+                                    "insert into meal_carts(user_id,personalized_routine_id,partner,status,checkout_url,expires_at,created_at) values(?,?,?,'ACTIVE',?,?,?)",
+                                    Statement.RETURN_GENERATED_KEYS);
+                    statement.setLong(1, userId);
+                    if (routineId == null) statement.setNull(2, java.sql.Types.BIGINT);
+                    else statement.setLong(2, routineId);
+                    statement.setString(3, partner.trim());
+                    statement.setString(4, checkoutUrl);
+                    statement.setObject(5, expiresAt);
+                    statement.setObject(6, createdAt);
+                    return statement;
+                },
+                key);
+        Long cartId = Objects.requireNonNull(key.getKey()).longValue();
+
+        for (Map<String, Object> item : items) {
+            db.update(
+                    "insert into meal_cart_items(meal_cart_id,market_item_id,quantity,unit_price,created_at) values(?,?,?,?,?)",
+                    cartId,
+                    item.get("marketItemId"),
+                    item.get("quantity"),
+                    item.get("unitPrice"),
+                    createdAt);
+        }
+
         return Map.of(
                 "cartId",
-                UUID.randomUUID().toString(),
+                cartId,
+                "routineId",
+                routineId == null ? "" : routineId,
                 "partner",
-                partner,
+                partner.trim(),
                 "checkoutUrl",
-                "https://partner.example.com/deep-link",
+                checkoutUrl,
                 "items",
                 items,
                 "expiresAt",
-                Instant.now().plusSeconds(1800));
+                expiresAt);
+    }
+
+    private void validateRoutineOwner(Long userId, Long routineId) {
+        if (routineId == null) return;
+        List<Map<String, Object>> routines =
+                db.queryForList(
+                        "select status,type from personalized_routines where personalized_routine_id=? and user_id=? and deleted_at is null",
+                        routineId,
+                        userId);
+        if (routines.isEmpty()) {
+            throw ApiException.notFound("장바구니를 구성할 식단 루틴을 찾을 수 없습니다.");
+        }
+        Map<String, Object> routine = routines.getFirst();
+        if (!"ACTIVE".equalsIgnoreCase(value(routine, "status"))) {
+            throw ApiException.conflict("현재 진행 중인 식단 루틴만 장바구니로 구성할 수 있습니다.");
+        }
+        String type = value(routine, "type");
+        if (!Set.of("MEAL", "MIXED").contains(type.toUpperCase(Locale.ROOT))) {
+            throw new IllegalArgumentException("식단이 포함된 루틴만 장바구니로 구성할 수 있습니다.");
+        }
+        Integer mealCount =
+                db.queryForObject(
+                        "select count(*) from routine_items where personalized_routine_id=? and item_type='MEAL' and deleted_at is null",
+                        Integer.class,
+                        routineId);
+        if (mealCount == null || mealCount == 0) {
+            throw new IllegalArgumentException("루틴에 장바구니로 구성할 식단 항목이 없습니다.");
+        }
+    }
+
+    private String value(Map<String, Object> row, String key) {
+        for (Map.Entry<String, Object> entry : row.entrySet()) {
+            if (entry.getKey().equalsIgnoreCase(key)) {
+                return Objects.toString(entry.getValue(), "");
+            }
+        }
+        return "";
+    }
+
+    private List<Map<String, Object>> normalizeCartItems(
+            String partner, List<Map<String, Object>> requestedItems) {
+        if (partner == null || partner.isBlank() || partner.length() > 100) {
+            throw new IllegalArgumentException("제휴사 이름이 필요합니다.");
+        }
+        if (requestedItems == null || requestedItems.isEmpty() || requestedItems.size() > 50) {
+            throw new IllegalArgumentException("장바구니 상품은 1~50개여야 합니다.");
+        }
+
+        Map<Long, Integer> quantities = new LinkedHashMap<>();
+        for (Map<String, Object> item : requestedItems) {
+            Object rawId =
+                    item.containsKey("marketItemId")
+                            ? item.get("marketItemId")
+                            : item.get("externalProductId");
+            Long marketItemId = positiveLong(rawId, "marketItemId");
+            int quantity = positiveInteger(item.getOrDefault("quantity", 1), "quantity");
+            if (quantity > 20) throw new IllegalArgumentException("상품 수량은 최대 20개입니다.");
+            quantities.merge(marketItemId, quantity, Integer::sum);
+            if (quantities.get(marketItemId) > 20) {
+                throw new IllegalArgumentException("같은 상품의 합계 수량은 최대 20개입니다.");
+            }
+        }
+
+        List<Map<String, Object>> normalized = new ArrayList<>();
+        quantities.forEach(
+                (marketItemId, quantity) -> {
+                    List<Map<String, Object>> found =
+                            db.queryForList(
+                                    "select market_item_id marketItemId,name,price unitPrice from market_items where market_item_id=? and provider_name=? and item_type='MEAL' and status in ('ACTIVE','PUBLISHED')",
+                                    marketItemId,
+                                    partner.trim());
+                    if (found.isEmpty()) {
+                        throw ApiException.notFound("해당 제휴사에서 판매 중인 식단 상품을 찾을 수 없습니다.");
+                    }
+                    Map<String, Object> product = new LinkedHashMap<>(found.getFirst());
+                    product.put("quantity", quantity);
+                    normalized.add(product);
+                });
+        return normalized;
+    }
+
+    private Long positiveLong(Object value, String label) {
+        try {
+            long parsed = Long.parseLong(String.valueOf(value));
+            if (parsed <= 0) throw new NumberFormatException();
+            return parsed;
+        } catch (Exception exception) {
+            throw new IllegalArgumentException(label + " 값이 올바르지 않습니다.");
+        }
+    }
+
+    private int positiveInteger(Object value, String label) {
+        try {
+            int parsed = Integer.parseInt(String.valueOf(value));
+            if (parsed <= 0) throw new NumberFormatException();
+            return parsed;
+        } catch (Exception exception) {
+            throw new IllegalArgumentException(label + " 값이 올바르지 않습니다.");
+        }
     }
 }

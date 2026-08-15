@@ -1,15 +1,18 @@
 package tri_lion.health.service.record;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.math.BigDecimal;
 import java.time.*;
 import java.util.*;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import tri_lion.health.domain.health.*;
 import tri_lion.health.domain.record.*;
 import tri_lion.health.domain.routine.ExerciseItem;
+import tri_lion.health.domain.routine.Routine;
 import tri_lion.health.dto.request.record.RecordBatchRequest;
 import tri_lion.health.dto.request.record.RecordRequest;
 import tri_lion.health.exception.ApiException;
@@ -31,6 +34,7 @@ public class RecordService {
     private final ObjectMapper json;
     private final AiClients.LlmClient llm;
     private final ObjectStorage storage;
+    private final JdbcTemplate db;
 
     public RecordService(
             RecordRepositories.Records r,
@@ -41,7 +45,8 @@ public class RecordService {
             AuthenticatedUser a,
             ObjectMapper o,
             AiClients.LlmClient l,
-            ObjectStorage storage) {
+            ObjectStorage storage,
+            JdbcTemplate db) {
         records = r;
         coachings = c;
         items = i;
@@ -51,6 +56,7 @@ public class RecordService {
         json = o;
         llm = l;
         this.storage = storage;
+        this.db = db;
     }
 
     @Transactional
@@ -102,8 +108,15 @@ public class RecordService {
                     items.findById(q.routineItemId())
                             .filter(x -> x.getDeletedAt() == null)
                             .orElseThrow(() -> ApiException.notFound("루틴 항목을 찾을 수 없습니다."));
-            routines.findByIdAndUserIdAndDeletedAtIsNull(item.getRoutineId(), uid)
-                    .orElseThrow(() -> ApiException.notFound("루틴 항목을 찾을 수 없습니다."));
+            Routine routine =
+                    routines.findByIdAndUserIdAndDeletedAtIsNull(item.getRoutineId(), uid)
+                            .orElseThrow(() -> ApiException.notFound("루틴 항목을 찾을 수 없습니다."));
+            if (routine.getStatus() != Routine.Status.ACTIVE) {
+                throw ApiException.conflict("현재 진행 중인 루틴의 항목만 기록할 수 있습니다.");
+            }
+            if (item.getStatus() == ExerciseItem.Status.COMPLETED) {
+                throw ApiException.conflict("이미 완료한 루틴 항목입니다.");
+            }
             if (!q.type().name().equals(item.getItemType()))
                 throw new ApiException(HttpStatus.BAD_REQUEST, "루틴 항목과 기록 타입이 일치하지 않습니다.");
         }
@@ -133,6 +146,9 @@ public class RecordService {
                 if (skipped) item.skip();
                 else item.complete();
             }
+            if (!skipped && q.type() == ActivityType.WEIGHT) {
+                saveWeightMetric(uid, q);
+            }
             if (createCoaching && !skipped && q.type() != ActivityType.OTHER)
                 createCoachingJob(
                         uid,
@@ -147,6 +163,36 @@ public class RecordService {
         } catch (Exception e) {
             throw new IllegalArgumentException(e);
         }
+    }
+
+    private void saveWeightMetric(Long userId, RecordRequest request) {
+        Object raw =
+                request.details().containsKey("weightKg")
+                        ? request.details().get("weightKg")
+                        : request.details().get("value");
+        BigDecimal weight;
+        try {
+            weight = new BigDecimal(String.valueOf(raw));
+        } catch (Exception exception) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "체중 기록에는 weightKg 값이 필요합니다.");
+        }
+        if (weight.compareTo(new BigDecimal("20")) < 0
+                || weight.compareTo(new BigDecimal("500")) > 0) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "체중은 20~500kg 범위여야 합니다.");
+        }
+        db.update(
+                "insert into health_records(user_id,metric_type,metric_value,unit,input_source,measured_at) values(?,?,?,?,?,?)",
+                userId,
+                "WEIGHT",
+                weight,
+                "KG",
+                "CHATBOT",
+                request.recordedAt().toInstant());
+        db.update(
+                "update user_health_profiles set weight_kg=?,updated_at=? where user_id=?",
+                weight,
+                Instant.now(),
+                userId);
     }
 
     private void createCoachingJob(Long uid, ActivityRecord record, Map<String, Object> request) {

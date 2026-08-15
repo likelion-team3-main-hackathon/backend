@@ -51,6 +51,9 @@ app:
     endpoint: ${OBJECT_STORAGE_ENDPOINT:http://localhost:9000}
     private-bucket: ${OBJECT_STORAGE_BUCKET_PRIVATE:health-private}
     public-bucket: ${OBJECT_STORAGE_BUCKET_PUBLIC:health-public}
+  gemini:
+    api-key: ${GEMINI_API_KEY:}
+    model: ${GEMINI_MODEL:gemini-2.5-flash-lite}
 
 ---
 spring:
