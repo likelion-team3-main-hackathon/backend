@@ -71,16 +71,17 @@ public class HealthAiTaskService {
             List<Long> documentIds,
             String summary,
             String result,
-            String model) {
+            String model,
+            String promptVersion) {
         Analysis analysis = analyses.findById(job.resultId()).orElseThrow();
-        analysis.complete(summary, result, model, "health-v3-multi-document");
+        analysis.complete(summary, result, model, promptVersion);
         documentIds.forEach(
                 id ->
                         documents
                                 .findByIdAndUserIdAndDeletedAtIsNull(id, job.userId())
                                 .ifPresent(HealthDocument::processed));
         var aiJob = jobs.findForUpdateById(job.id()).orElseThrow();
-        aiJob.complete(model, "health-v3-multi-document");
+        aiJob.complete(model, promptVersion);
     }
 
     @Transactional

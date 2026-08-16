@@ -12,6 +12,10 @@ public final class AiClients {
         default String modelVersion() {
             return "unknown";
         }
+
+        default String promptVersion() {
+            return "unknown";
+        }
     }
 
     public interface LlmClient {
@@ -34,6 +38,18 @@ public final class AiClients {
         }
 
         default String coachingModelVersion() {
+            return "unknown";
+        }
+
+        default String analysisPromptVersion() {
+            return "unknown";
+        }
+
+        default String routinePromptVersion() {
+            return "unknown";
+        }
+
+        default String coachingPromptVersion() {
             return "unknown";
         }
     }

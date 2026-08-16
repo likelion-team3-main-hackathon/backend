@@ -164,6 +164,10 @@ class CoreFlowIntegrationTests {
         JsonNode routineDetail =
                 json.readTree(detail.getResponse().getContentAsString()).at("/data");
         assertThat(routineDetail.path("days").size()).isEqualTo(21);
+        assertThat(routineDetail.path("days").get(0).path("mealSummaryTitle").asText())
+                .isNotBlank();
+        assertThat(routineDetail.path("days").get(0).path("exerciseSummaryTitle").asText())
+                .isNotBlank();
         JsonNode firstExercise = null;
         JsonNode firstMeal = null;
         var exerciseIds = new ArrayList<Long>();

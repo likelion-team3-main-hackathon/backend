@@ -210,47 +210,40 @@ public class RoutineController {
         m.putAll(summary(r));
         m.put("description", r.getDescription());
         m.put("aiAdjustmentAllowed", r.isAiAdjustmentAllowed());
-        m.put(
-                "days",
-                d.days().stream()
-                        .map(
-                                x ->
-                                        Map.of(
-                                                "routineDayId",
-                                                x.routineDayId(),
-                                                "dayOfWeek",
-                                                x.dayOfWeek(),
-                                                "week",
-                                                x.week(),
-                                                "scheduledDate",
-                                                x.scheduledDate(),
-                                                "estimatedMinutes",
-                                                x.estimatedMinutes(),
-                                                "sections",
-                                                x.sections().stream()
-                                                        .map(
-                                                                s ->
-                                                                        Map.of(
-                                                                                "sectionId",
-                                                                                s.sectionId(),
-                                                                                "sectionType",
-                                                                                s.sectionType(),
-                                                                                "title",
-                                                                                s.title(),
-                                                                                "order",
-                                                                                s.order(),
-                                                                                "exercises",
-                                                                                s
-                                                                                        .exercises()
-                                                                                        .stream()
-                                                                                        .map(
-                                                                                                this
-                                                                                                        ::exercise)
-                                                                                        .toList()))
-                                                        .toList()))
-                        .toList());
+        m.put("days", d.days().stream().map(this::day).toList());
         m.put("createdAt", r.getCreatedAt());
         return m;
+    }
+
+    private Map<String, Object> day(RoutineService.DayView day) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("routineDayId", day.routineDayId());
+        result.put("dayOfWeek", day.dayOfWeek());
+        result.put("week", day.week());
+        result.put("scheduledDate", day.scheduledDate());
+        result.put("estimatedMinutes", day.estimatedMinutes());
+        result.put("mealSummaryTitle", day.mealSummaryTitle());
+        result.put("exerciseSummaryTitle", day.exerciseSummaryTitle());
+        result.put(
+                "sections",
+                day.sections().stream()
+                        .map(
+                                section ->
+                                        Map.of(
+                                                "sectionId",
+                                                section.sectionId(),
+                                                "sectionType",
+                                                section.sectionType(),
+                                                "title",
+                                                section.title(),
+                                                "order",
+                                                section.order(),
+                                                "exercises",
+                                                section.exercises().stream()
+                                                        .map(this::exercise)
+                                                        .toList()))
+                        .toList());
+        return result;
     }
 
     private Map<String, Object> exercise(ExerciseItem i) {

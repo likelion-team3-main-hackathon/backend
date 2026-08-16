@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.*;
 import java.util.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -16,14 +18,17 @@ import tri_lion.health.domain.routine.Routine;
 import tri_lion.health.dto.request.record.RecordBatchRequest;
 import tri_lion.health.dto.request.record.RecordRequest;
 import tri_lion.health.exception.ApiException;
+import tri_lion.health.exception.RateLimitExceededException;
 import tri_lion.health.external.storage.ObjectStorage;
 import tri_lion.health.repository.health.HealthRepositories;
 import tri_lion.health.repository.record.RecordRepositories;
 import tri_lion.health.repository.routine.RoutineRepositories;
 import tri_lion.health.security.AuthenticatedUser;
+import tri_lion.health.service.health.AiRequestLimitService;
 
 @Service
 public class RecordService {
+    private static final Logger log = LoggerFactory.getLogger(RecordService.class);
     private final RecordRepositories.Records records;
     private final RecordRepositories.Coachings coachings;
     private final RoutineRepositories.Items items;
@@ -31,29 +36,32 @@ public class RecordService {
     private final HealthRepositories.Jobs jobs;
     private final AuthenticatedUser auth;
     private final ObjectMapper json;
-    private final ObjectStorage storage;
-    private final JdbcTemplate db;
+private final ObjectStorage storage;
+private final JdbcTemplate db;
+private final AiRequestLimitService limits;
 
-    public RecordService(
-            RecordRepositories.Records r,
-            RecordRepositories.Coachings c,
-            RoutineRepositories.Items i,
-            RoutineRepositories.Routines routines,
-            HealthRepositories.Jobs j,
-            AuthenticatedUser a,
-            ObjectMapper o,
-            ObjectStorage storage,
-            JdbcTemplate db) {
-        records = r;
-        coachings = c;
-        items = i;
-        this.routines = routines;
-        jobs = j;
-        auth = a;
-        json = o;
-        this.storage = storage;
-        this.db = db;
-    }
+public RecordService(
+        RecordRepositories.Records r,
+        RecordRepositories.Coachings c,
+        RoutineRepositories.Items i,
+        RoutineRepositories.Routines routines,
+        HealthRepositories.Jobs j,
+        AuthenticatedUser a,
+        ObjectMapper o,
+        ObjectStorage storage,
+        JdbcTemplate db,
+        AiRequestLimitService limits) {
+    records = r;
+    coachings = c;
+    items = i;
+    this.routines = routines;
+    jobs = j;
+    auth = a;
+    json = o;
+    this.storage = storage;
+    this.db = db;
+    this.limits = limits;
+}
 
     @Transactional
     public ActivityRecord create(RecordRequest q) {
@@ -193,6 +201,7 @@ public class RecordService {
 
     private void createCoachingJob(Long uid, ActivityRecord record, Map<String, Object> request) {
         try {
+            limits.authorizeJob(uid, AiJob.Type.RECORD_COACHING);
             jobs.save(
                     new AiJob(
                             uid,
@@ -200,6 +209,11 @@ public class RecordService {
                             json.writeValueAsString(request),
                             record.getId(),
                             "record-" + record.getId()));
+        } catch (RateLimitExceededException exception) {
+            log.info(
+                    "AI coaching skipped by request limit: userId={}, recordId={}",
+                    uid,
+                    record.getId());
         } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
             throw new IllegalArgumentException(exception);
         }
@@ -240,9 +254,10 @@ public class RecordService {
             Long recordId,
             String message,
             String safetyLevel,
-            String modelVersion) {
+            String modelVersion,
+            String promptVersion) {
         coachings.save(new Coaching(userId, recordId, message, safetyLevel));
         AiJob job = jobs.findForUpdateById(jobId).orElseThrow();
-        job.complete(modelVersion, "coaching-v2");
+        job.complete(modelVersion, promptVersion);
     }
 }

@@ -19,6 +19,7 @@ public class AnalysisService {
     private final UserRepositories.Users users;
     private final ObjectMapper json;
     private final AuthenticatedUser auth;
+    private final AiRequestLimitService limits;
 
     public AnalysisService(
             HealthRepositories.Analyses a,
@@ -26,13 +27,15 @@ public class AnalysisService {
             HealthRepositories.Jobs j,
             UserRepositories.Users u,
             ObjectMapper o,
-            AuthenticatedUser au) {
+            AuthenticatedUser au,
+            AiRequestLimitService limits) {
         analyses = a;
         docs = d;
         jobs = j;
         users = u;
         json = o;
         auth = au;
+        this.limits = limits;
     }
 
     @Transactional
@@ -43,12 +46,23 @@ public class AnalysisService {
         for (Long id : ids)
             docs.findByIdAndUserIdAndDeletedAtIsNull(id, uid)
                     .orElseThrow(() -> ApiException.notFound("건강 문서를 찾을 수 없습니다."));
+        limits.lockJobCreation();
         if (key != null) {
             var existing =
                     jobs.findByUserIdAndTypeAndIdempotencyKey(uid, AiJob.Type.HEALTH_ANALYSIS, key);
             if (existing.isPresent())
                 return analyses.findById(existing.get().getResultId()).orElseThrow();
         }
+        var active =
+                jobs.findFirstByUserIdAndTypeAndStatusInOrderByCreatedAtDesc(
+                        uid,
+                        AiJob.Type.HEALTH_ANALYSIS,
+                        List.of(
+                                AiJob.Status.PENDING,
+                                AiJob.Status.PROCESSING,
+                                AiJob.Status.RETRYING));
+        if (active.isPresent()) return analyses.findById(active.get().getResultId()).orElseThrow();
+        limits.authorizeJob(uid, AiJob.Type.HEALTH_ANALYSIS);
         try {
             Analysis a = analyses.save(new Analysis(uid, json.writeValueAsString(ids)));
             jobs.save(
