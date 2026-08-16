@@ -3,6 +3,8 @@ package tri_lion.health.domain.health;
 import jakarta.persistence.*;
 import java.time.*;
 import lombok.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "health_documents")
@@ -35,6 +37,22 @@ public class HealthDocument {
 
     @Column(name = "measured_at")
     private LocalDate measuredAt;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "extracted_data")
+    private String extractedData;
+
+    @Column(name = "extraction_model_version")
+    private String extractionModelVersion;
+
+    @Column(name = "extraction_prompt_version")
+    private String extractionPromptVersion;
+
+    @Column(name = "extracted_at")
+    private Instant extractedAt;
+
+    @Column(name = "extraction_failure_reason")
+    private String extractionFailureReason;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "processing_status")
@@ -71,7 +89,24 @@ public class HealthDocument {
         processingStatus = Status.PROCESSED;
     }
 
+    public void extracted(String data, String model, String prompt) {
+        extractedData = data;
+        extractionModelVersion = model;
+        extractionPromptVersion = prompt;
+        extractedAt = Instant.now();
+        extractionFailureReason = null;
+    }
+
+    public void measuredAt(LocalDate value) {
+        if (value != null) measuredAt = value;
+    }
+
     public void fail() {
+        processingStatus = Status.FAILED;
+    }
+
+    public void extractionFailed(String reason) {
+        extractionFailureReason = reason;
         processingStatus = Status.FAILED;
     }
 

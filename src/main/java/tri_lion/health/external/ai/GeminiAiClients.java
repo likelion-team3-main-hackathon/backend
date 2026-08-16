@@ -74,7 +74,7 @@ public class GeminiAiClients {
             GeminiGateway gateway,
             PromptCatalog prompts,
             @Value("${app.ai.models.analysis:gemini-3.6-flash}") String analysisModel,
-            @Value("${app.ai.models.routine:gemini-3.6-flash}") String routineModel,
+            @Value("${app.ai.models.routine:gemini-3.5-flash-lite}") String routineModel,
             @Value("${app.ai.models.coaching:gemini-3.5-flash-lite}") String coachingModel) {
         return new AiClients.LlmClient() {
             @Override
@@ -269,7 +269,7 @@ public class GeminiAiClients {
         private static final Map<String, Object> DOCUMENT_EXTRACTION =
                 schema(
                         """
-                        {"type":"object","properties":{"documents":{"type":"array","items":{"type":"object","properties":{"documentId":{"type":"integer"},"documentType":{"type":"string"},"measuredDate":{"type":["string","null"]},"measurements":{"type":"array","items":{"type":"object","properties":{"code":{"type":"string"},"label":{"type":"string"},"value":{"type":["number","null"]},"textValue":{"type":["string","null"]},"unit":{"type":["string","null"]},"referenceMin":{"type":["number","null"]},"referenceMax":{"type":["number","null"]},"sourceText":{"type":"string"},"confidence":{"type":"number"}},"required":["code","label","value","textValue","unit","referenceMin","referenceMax","sourceText","confidence"]}},"keyFacts":{"type":"array","items":{"type":"object","properties":{"category":{"type":"string","enum":["DIAGNOSIS","ALLERGY","OBSERVATION","RECOMMENDATION"]},"label":{"type":"string"},"value":{"type":"string"},"sourceText":{"type":"string"},"confidence":{"type":"number"}},"required":["category","label","value","sourceText","confidence"]}},"unreadableFields":{"type":"array","items":{"type":"string"}}},"required":["documentId","documentType","measuredDate","measurements","keyFacts","unreadableFields"]}}},"required":["documents"]}
+                        {"type":"object","properties":{"documents":{"type":"array","items":{"type":"object","properties":{"documentId":{"type":"integer"},"documentType":{"type":"string"},"measuredDate":{"type":["string","null"]},"measurements":{"type":"array","items":{"type":"object","properties":{"code":{"type":"string"},"label":{"type":"string"},"bodyPart":{"type":["string","null"]},"bodySide":{"type":["string","null"]},"value":{"type":["number","null"]},"textValue":{"type":["string","null"]},"unit":{"type":["string","null"]},"referenceMin":{"type":["number","null"]},"referenceMax":{"type":["number","null"]},"sourceText":{"type":"string"},"confidence":{"type":"number"}},"required":["code","label","bodyPart","bodySide","value","textValue","unit","referenceMin","referenceMax","sourceText","confidence"]}},"keyFacts":{"type":"array","items":{"type":"object","properties":{"category":{"type":"string","enum":["DIAGNOSIS","ALLERGY","OBSERVATION","RECOMMENDATION"]},"label":{"type":"string"},"value":{"type":"string"},"sourceText":{"type":"string"},"confidence":{"type":"number"}},"required":["category","label","value","sourceText","confidence"]}},"unreadableFields":{"type":"array","items":{"type":"string"}}},"required":["documentId","documentType","measuredDate","measurements","keyFacts","unreadableFields"]}}},"required":["documents"]}
                         """);
         private static final Map<String, Object> HEALTH_ANALYSIS =
                 schema(

@@ -49,6 +49,8 @@ app:
     refresh-cookie-secure: ${REFRESH_COOKIE_SECURE:true}
   storage:
     endpoint: ${OBJECT_STORAGE_ENDPOINT:http://localhost:9000}
+    access-key: ${OBJECT_STORAGE_ACCESS_KEY:minioadmin}
+    secret-key: ${OBJECT_STORAGE_SECRET_KEY:minioadmin123}
     private-bucket: ${OBJECT_STORAGE_BUCKET_PRIVATE:health-private}
     public-bucket: ${OBJECT_STORAGE_BUCKET_PUBLIC:health-public}
   gemini:
@@ -62,12 +64,12 @@ app:
     models:
 
       analysis: ${GEMINI_MODEL_ANALYSIS:gemini-3.6-flash}
-      routine: ${GEMINI_MODEL_ROUTINE:gemini-3.6-flash}
+      routine: ${GEMINI_MODEL_ROUTINE:gemini-3.5-flash-lite}
       coaching: ${GEMINI_MODEL_COACHING:gemini-3.5-flash-lite}
     prompts:
-      document-extraction-version: ${AI_PROMPT_DOCUMENT_EXTRACTION_VERSION:document-v1-multi}
+      document-extraction-version: ${AI_PROMPT_DOCUMENT_EXTRACTION_VERSION:document-v3-iso-measured-date}
       health-analysis-version: ${AI_PROMPT_HEALTH_ANALYSIS_VERSION:health-v3-multi-document}
-      routine-generation-version: ${AI_PROMPT_ROUTINE_GENERATION_VERSION:routine-v6-day-summaries}
+      routine-generation-version: ${AI_PROMPT_ROUTINE_GENERATION_VERSION:routine-v7-explicit-date-range}
       record-coaching-version: ${AI_PROMPT_RECORD_COACHING_VERSION:coaching-v2}
     gemini:
       api-key: ${GOOGLE_API_KEY:${GEMINI_API_KEY:}}

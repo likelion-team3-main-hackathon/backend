@@ -264,7 +264,7 @@ public class RoutineService {
             ExerciseTemplate exercise = exercises.get(index);
             int sectionOrder = sectionOrders.get(exercise.sectionType());
             int sequence = sequences.merge(exercise.sectionType(), 1, Integer::sum);
-            items.save(
+            ExerciseItem item =
                     new ExerciseItem(
                             routine.getId(),
                             sectionBase + sectionOrder,
@@ -287,8 +287,27 @@ public class RoutineService {
                             null,
                             null,
                             false,
-                            Routine.Editor.AI));
+                            Routine.Editor.AI);
+            try {
+                item.muscleGroups(json.writeValueAsString(inferMuscleGroups(exercise)));
+            } catch (Exception ignored) {
+                item.muscleGroups("[]");
+            }
+            items.save(item);
         }
+    }
+
+    private List<String> inferMuscleGroups(ExerciseTemplate exercise) {
+        String value = (exercise.sectionTitle() + " " + exercise.title()).toLowerCase();
+        if (!"MAIN_EXERCISE".equals(exercise.sectionType())) return List.of("MOBILITY");
+        List<String> groups = new ArrayList<>();
+        if (value.matches(".*(가슴|체스트|푸시업|벤치).*")) groups.add("CHEST");
+        if (value.matches(".*(등|로우|랫풀|풀업).*")) groups.add("BACK");
+        if (value.matches(".*(어깨|숄더|레터럴).*")) groups.add("SHOULDERS");
+        if (value.matches(".*(이두|삼두|컬|팔).*")) groups.add("ARMS");
+        if (value.matches(".*(하체|스쿼트|런지|둔근|힙|레그).*")) groups.add("LEGS");
+        if (value.matches(".*(코어|복부|크런치|플랭크|버드독|데드버그).*")) groups.add("CORE");
+        return groups.isEmpty() ? List.of("FULL_BODY") : groups;
     }
 
     private void saveMealDay(
@@ -731,6 +750,7 @@ public class RoutineService {
     private String routineInput(AiJob job, JsonNode request) throws Exception {
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("request", request);
+        input.putAll(routineDateRange(request));
         Analysis analysis =
                 request.hasNonNull("analysisId")
                         ? analyses.findByIdAndUserId(
@@ -776,6 +796,15 @@ public class RoutineService {
             input.put("protectedItems", protectedItems);
         }
         return json.writeValueAsString(input);
+    }
+
+    static Map<String, Object> routineDateRange(JsonNode request) {
+        LocalDate startDate = LocalDate.parse(request.path("startDate").asText());
+        int totalDays = Math.multiplyExact(request.path("durationWeeks").asInt(), 7);
+        return Map.of(
+                "startDate", startDate.toString(),
+                "expectedEndDate", startDate.plusDays(totalDays - 1L).toString(),
+                "totalDays", totalDays);
     }
 
     private String dailySummariesJson(RoutinePlan plan) throws Exception {

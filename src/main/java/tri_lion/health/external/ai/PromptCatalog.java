@@ -20,11 +20,11 @@ public class PromptCatalog {
 
     public PromptCatalog(
             ResourceLoader resources,
-            @Value("${app.ai.prompts.document-extraction-version:document-v1-multi}")
+            @Value("${app.ai.prompts.document-extraction-version:document-v3-iso-measured-date}")
                     String documentExtractionVersion,
             @Value("${app.ai.prompts.health-analysis-version:health-v3-multi-document}")
                     String healthAnalysisVersion,
-            @Value("${app.ai.prompts.routine-generation-version:routine-v6-day-summaries}")
+            @Value("${app.ai.prompts.routine-generation-version:routine-v7-explicit-date-range}")
                     String routineGenerationVersion,
             @Value("${app.ai.prompts.record-coaching-version:coaching-v2}")
                     String recordCoachingVersion) {
