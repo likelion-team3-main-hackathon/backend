@@ -73,7 +73,16 @@ public class Routine {
 
     public Routine(
             Long u, String title, LocalDate start, int weeks, Long previous, Type routineType) {
-        this(u, title, "개인 제약을 반영한 맞춤 웰니스 루틴입니다.", start, weeks, previous, routineType);
+        this(
+                u,
+                title,
+                "개인 제약을 반영한 맞춤 웰니스 루틴입니다.",
+                start,
+                weeks,
+                previous,
+                null,
+                routineType,
+                Source.AI_GENERATED);
     }
 
     public Routine(
@@ -84,17 +93,52 @@ public class Routine {
             int weeks,
             Long previous,
             Type routineType) {
+        this(u, title, description, start, weeks, previous, null, routineType, Source.AI_GENERATED);
+    }
+
+    public Routine(
+            Long u,
+            String title,
+            LocalDate start,
+            int weeks,
+            Long previous,
+            Long sourceCurriculumId,
+            Type routineType,
+            Source routineSource) {
+        this(
+                u,
+                title,
+                "개인 제약을 반영한 맞춤 웰니스 루틴입니다.",
+                start,
+                weeks,
+                previous,
+                sourceCurriculumId,
+                routineType,
+                routineSource);
+    }
+
+    public Routine(
+            Long u,
+            String title,
+            String description,
+            LocalDate start,
+            int weeks,
+            Long previous,
+            Long sourceCurriculumId,
+            Type routineType,
+            Source routineSource) {
         userId = u;
         this.title = title;
         this.description = description;
         type = routineType;
-        source = Source.AI_GENERATED;
+        source = routineSource;
         startDate = start;
         endDate = start.plusWeeks(weeks).minusDays(1);
         status = Status.ACTIVE;
         aiAdjustmentAllowed = true;
         lastModifiedBy = Editor.AI;
         previousRoutineId = previous;
+        this.sourceCurriculumId = sourceCurriculumId;
         createdAt = Instant.now();
         updatedAt = createdAt;
     }
@@ -111,6 +155,17 @@ public class Routine {
         if (allowed != null) aiAdjustmentAllowed = allowed;
         if (status != null) this.status = Status.valueOf(status);
         lastModifiedBy = Editor.USER;
+        updatedAt = Instant.now();
+    }
+
+    public void applyAiMetadata(String description, String goal) {
+        if (description != null && !description.isBlank()) {
+            this.description = description;
+        }
+        if (goal != null && !goal.isBlank()) {
+            this.goal = goal;
+        }
+        lastModifiedBy = Editor.AI;
         updatedAt = Instant.now();
     }
 

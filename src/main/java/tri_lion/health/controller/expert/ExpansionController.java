@@ -125,6 +125,10 @@ public class ExpansionController {
                                 201,
                                 "제휴 상품 장바구니 구성 성공",
                                 service.cart(
+                                        q.get("routineId") == null
+                                                ? null
+                                                : Long.parseLong(
+                                                        String.valueOf(q.get("routineId"))),
                                         String.valueOf(q.get("partner")),
                                         (List<Map<String, Object>>)
                                                 q.getOrDefault("items", List.of()))));

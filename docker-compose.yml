@@ -41,6 +41,8 @@ services:
       AI_ROUTINE_ADJUSTMENT_PER_USER_DAY: ${AI_ROUTINE_ADJUSTMENT_PER_USER_DAY:-5}
       AI_RECORD_COACHING_PER_USER_DAY: ${AI_RECORD_COACHING_PER_USER_DAY:-20}
       JAVA_OPTS: ${JAVA_OPTS}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash-lite}
     depends_on:
       mysql: { condition: service_healthy }
       redis: { condition: service_healthy }

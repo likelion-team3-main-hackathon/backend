@@ -76,3 +76,6 @@ out/
 
 ### VS Code ###
 .vscode/
+
+### Editor temporary files ###
+*.swp

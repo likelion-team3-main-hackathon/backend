@@ -53,12 +53,16 @@ app:
     secret-key: ${OBJECT_STORAGE_SECRET_KEY:minioadmin123}
     private-bucket: ${OBJECT_STORAGE_BUCKET_PRIVATE:health-private}
     public-bucket: ${OBJECT_STORAGE_BUCKET_PUBLIC:health-public}
+  gemini:
+    api-key: ${GEMINI_API_KEY:}
+    model: ${GEMINI_MODEL:gemini-3.1-flash-lite}
   ai:
     provider: ${AI_PROVIDER:fake}
     connect-timeout-seconds: ${AI_CONNECT_TIMEOUT_SECONDS:5}
     read-timeout-seconds: ${AI_READ_TIMEOUT_SECONDS:180}
     debug-log-responses: ${AI_DEBUG_LOG_RESPONSES:false}
     models:
+
       analysis: ${GEMINI_MODEL_ANALYSIS:gemini-3.6-flash}
       routine: ${GEMINI_MODEL_ROUTINE:gemini-3.5-flash-lite}
       coaching: ${GEMINI_MODEL_COACHING:gemini-3.5-flash-lite}
@@ -68,7 +72,7 @@ app:
       routine-generation-version: ${AI_PROMPT_ROUTINE_GENERATION_VERSION:routine-v7-explicit-date-range}
       record-coaching-version: ${AI_PROMPT_RECORD_COACHING_VERSION:coaching-v2}
     gemini:
-      api-key: ${GOOGLE_API_KEY:}
+      api-key: ${GOOGLE_API_KEY:${GEMINI_API_KEY:}}
       base-url: ${GEMINI_BASE_URL:https://generativelanguage.googleapis.com/v1beta}
     limits:
       enabled: ${AI_RATE_LIMIT_ENABLED:true}

@@ -4,6 +4,7 @@ import jakarta.validation.constraints.*;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
 public final class RoutineRequests {
     private RoutineRequests() {}
@@ -51,4 +52,42 @@ public final class RoutineRequests {
     public record OrderRequest(@NotEmpty List<Long> exerciseIds) {}
 
     public record AdjustmentRequest(@NotBlank String reason, String userMessage) {}
+
+    public record CurriculumPersonalizationRequest(
+            @NotNull Long curriculumId,
+            @NotNull Long analysisId,
+            @NotNull LocalDate startDate,
+            @Min(1) @Max(12) int durationWeeks,
+            List<Long> excludedItemIds,
+            List<PersonalizedItem> replacementItems) {}
+
+    public record ChatGenerationRequest(
+            @NotNull Long analysisId,
+            @NotBlank String title,
+            String goal,
+            @NotNull LocalDate startDate,
+            @Min(1) @Max(12) int durationWeeks,
+            @NotEmpty @Size(max = 200) List<GeneratedRoutineItem> items) {}
+
+    public record GeneratedRoutineItem(
+            @Min(0) int dayOffset,
+            @NotBlank String sectionType,
+            @NotBlank String sectionTitle,
+            @NotBlank String itemType,
+            @NotBlank String title,
+            String content,
+            String scheduledTime,
+            @DecimalMin("0.1") BigDecimal targetValue,
+            @NotBlank String targetUnit,
+            @Min(1) Integer sets,
+            @Min(0) Integer restSeconds,
+            String memo) {}
+
+    public record PersonalizedItem(
+            @NotNull Long sourceItemId,
+            @NotBlank String activityType,
+            @NotBlank String title,
+            String description,
+            @Min(1) @Max(300) Integer durationMinutes,
+            Map<String, Object> details) {}
 }
