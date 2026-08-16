@@ -75,8 +75,22 @@ public class AnalysisLabService {
         metrics.add(metric("MEAL", "식단", nutrition));
         metrics.add(metric("EXERCISE", "운동", exercise));
         metrics.add(metric("BODY_COMPOSITION", "체성분", body));
+        List<Map<String, Object>> wellnessAxes = new ArrayList<>();
+        wellnessAxes.add(metric("MEAL", "식단", nutrition));
+        wellnessAxes.add(metric("EXERCISE", "운동", exercise));
+        wellnessAxes.add(bodyAxis("BODY_FAT", "지방", body, "fatScore", "bodyFatPercent", "%"));
+        wellnessAxes.add(
+                bodyAxis(
+                        "SKELETAL_MUSCLE",
+                        "근육",
+                        body,
+                        "muscleScore",
+                        "skeletalMuscleMassKg",
+                        "kg"));
+        wellnessAxes.add(
+                wellnessAxis("HEALTH_MANAGEMENT", "건강 관리", 80, "MOCK", "임상·의료기록 연동 전 임시 점수"));
         List<Integer> scores =
-                metrics.stream()
+                wellnessAxes.stream()
                         .map(value -> (Integer) value.get("score"))
                         .filter(Objects::nonNull)
                         .toList();
@@ -96,9 +110,10 @@ public class AnalysisLabService {
                 "status",
                 scores.isEmpty()
                         ? "INSUFFICIENT_DATA"
-                        : scores.size() < metrics.size() ? "PARTIAL" : "AVAILABLE");
+                        : scores.size() < wellnessAxes.size() ? "PARTIAL" : "AVAILABLE");
         result.put("summary", overallSummary(nutrition, exercise, body));
         result.put("metrics", metrics);
+        result.put("wellnessAxes", wellnessAxes);
         result.put(
                 "labPreviews",
                 List.of(
@@ -185,6 +200,7 @@ public class AnalysisLabService {
         }
         int completedSets = 0;
         int completedMinutes = 0;
+        Map<LocalDate, int[]> daily = new TreeMap<>();
         Map<LocalDate, int[]> weekly = new TreeMap<>();
         for (ActivityRecord record : completed) {
             JsonNode details = parse(record.getDetails());
@@ -211,8 +227,11 @@ public class AnalysisLabService {
             completedSets += Math.max(0, sets);
             completedMinutes += Math.max(0, minutes);
             LocalDate date = record.getPerformedAt().atZone(SEOUL).toLocalDate();
-            LocalDate week = date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
-            int[] weekValue = weekly.computeIfAbsent(week, key -> new int[2]);
+            int[] dayValue = daily.computeIfAbsent(date, key -> new int[2]);
+            dayValue[0] += sets;
+            dayValue[1] += minutes;
+            LocalDate weekStart = date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+            int[] weekValue = weekly.computeIfAbsent(weekStart, key -> new int[2]);
             weekValue[0] += sets;
             weekValue[1] += minutes;
             if (item != null)
@@ -229,18 +248,41 @@ public class AnalysisLabService {
                 groups.entrySet().stream()
                         .map(entry -> muscleVolume(entry.getKey(), entry.getValue()))
                         .toList();
-        List<Map<String, Object>> weeklyVolume =
-                weekly.entrySet().stream()
-                        .map(
-                                entry ->
-                                        Map.<String, Object>of(
-                                                "weekStart",
-                                                entry.getKey(),
-                                                "completedSets",
-                                                entry.getValue()[0],
-                                                "durationMinutes",
-                                                entry.getValue()[1]))
-                        .toList();
+        List<Map<String, Object>> dailyTrend = new ArrayList<>();
+        for (LocalDate date = from; !date.isAfter(to); date = date.plusDays(1)) {
+            int[] value = daily.getOrDefault(date, new int[2]);
+            dailyTrend.add(
+                    Map.of(
+                            "date", date,
+                            "completedSets", value[0],
+                            "durationMinutes", value[1]));
+        }
+        LocalDate firstWeek = from.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        LocalDate lastWeek = to.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        List<Map<String, Object>> weeklyVolume = new ArrayList<>();
+        for (LocalDate weekStart = firstWeek;
+                !weekStart.isAfter(lastWeek);
+                weekStart = weekStart.plusWeeks(1)) {
+            int[] weekValue = weekly.getOrDefault(weekStart, new int[2]);
+            LocalDate wednesday = weekStart.plusDays(2);
+            int weekNumber = (wednesday.getDayOfMonth() - 1) / 7 + 1;
+            weeklyVolume.add(
+                    Map.of(
+                            "weekNumber",
+                            weekNumber,
+                            "month",
+                            wednesday.getMonthValue(),
+                            "label",
+                            wednesday.getMonthValue() + "월 " + weekNumber + "주",
+                            "weekStart",
+                            weekStart,
+                            "weekEnd",
+                            weekStart.plusDays(6),
+                            "completedSets",
+                            weekValue[0],
+                            "durationMinutes",
+                            weekValue[1]));
+        }
         Map<String, Object> result = new LinkedHashMap<>();
         result.put(
                 "status",
@@ -258,6 +300,7 @@ public class AnalysisLabService {
         result.put("recommendedSets", recommendedSets);
         result.put("durationMinutes", completedMinutes);
         result.put("muscleGroupVolumes", volumes);
+        result.put("dailyTrend", dailyTrend);
         result.put("weeklyVolume", weeklyVolume);
         result.put("summary", exerciseSummary(volumes, planned.isEmpty() && completed.isEmpty()));
         return result;
@@ -313,6 +356,9 @@ public class AnalysisLabService {
                         .count();
         result.put("status", measurementCount < 2 ? "PARTIAL" : "AVAILABLE");
         result.put("score", bodyCompositionScore(userId, from, to, values));
+        Integer bodyScore = (Integer) result.get("score");
+        result.put("fatScore", bodyAxisScore(values, "BODY_FAT_PERCENT", bodyScore));
+        result.put("muscleScore", bodyAxisScore(values, "SKELETAL_MUSCLE_MASS_KG", bodyScore));
         result.put("measurementCount", measurementCount);
         result.put("summary", bodySummary(latest, measurementCount));
         result.put("latest", latest);
@@ -386,6 +432,32 @@ public class AnalysisLabService {
         if (value >= min && value <= max) return 100;
         double distance = value < min ? min - value : value - max;
         return Math.max(0, 100 - distance / (max - min) * 100);
+    }
+
+    private Integer bodyAxisScore(
+            List<HealthMeasurement> values, String metricCode, Integer fallbackScore) {
+        LocalDate latestDate =
+                values.stream()
+                        .map(HealthMeasurement::getMeasuredAt)
+                        .filter(Objects::nonNull)
+                        .max(LocalDate::compareTo)
+                        .orElse(null);
+        if (latestDate == null) return fallbackScore;
+        return values.stream()
+                .filter(value -> metricCode.equals(value.getMetricCode()))
+                .filter(value -> latestDate.equals(value.getMeasuredAt()))
+                .filter(value -> value.getNumericValue() != null)
+                .findFirst()
+                .map(
+                        value -> {
+                            if (value.getReferenceMin() != null
+                                    && value.getReferenceMax() != null
+                                    && value.getReferenceMax().compareTo(value.getReferenceMin())
+                                            > 0)
+                                return (int) Math.round(referenceRangeScore(value));
+                            return fallbackScore;
+                        })
+                .orElse(fallbackScore);
     }
 
     private Map<String, Object> insufficientBody() {
@@ -835,6 +907,33 @@ public class AnalysisLabService {
                                     : source.get("measurementCount") + "회 측정";
                     default -> null;
                 });
+        return result;
+    }
+
+    private Map<String, Object> bodyAxis(
+            String type,
+            String label,
+            Map<String, Object> body,
+            String scoreKey,
+            String valueKey,
+            String unit) {
+        Map<String, Object> result =
+                wellnessAxis(type, label, (Integer) body.get(scoreKey), body.get("status"), null);
+        Object latest = body.get("latest");
+        if (latest instanceof Map<?, ?> latestValues && latestValues.get(valueKey) != null)
+            result.put(
+                    "note", label + " " + displayNumber(latestValues.get(valueKey)) + unit + " 기준");
+        return result;
+    }
+
+    private Map<String, Object> wellnessAxis(
+            String type, String label, Integer score, Object status, String note) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("type", type);
+        result.put("label", label);
+        result.put("score", score);
+        result.put("status", status);
+        result.put("note", note);
         return result;
     }
 
