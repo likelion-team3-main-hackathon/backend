@@ -1,6 +1,8 @@
 package tri_lion.health.exception;
 
 import jakarta.validation.ConstraintViolationException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -13,6 +15,8 @@ import tri_lion.health.common.response.ApiResponse;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
     @ExceptionHandler(RateLimitExceededException.class)
     ResponseEntity<ApiResponse<Void>> rateLimit(RateLimitExceededException e) {
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
@@ -53,6 +57,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     ResponseEntity<ApiResponse<Void>> unknown(Exception e) {
+        log.error("Unhandled API request failure", e);
         return ResponseEntity.internalServerError()
                 .body(ApiResponse.error(500, "서버 내부 오류가 발생했습니다.", null));
     }

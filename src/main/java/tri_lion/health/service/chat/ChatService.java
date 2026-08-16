@@ -135,9 +135,21 @@ public class ChatService {
         if (!Set.of("ANSWER", "CLARIFICATION", "ACTION_PROPOSAL").contains(decision.resultType())) {
             throw new ApiException(HttpStatus.BAD_GATEWAY, "AI 최종 응답 유형이 올바르지 않습니다.");
         }
-        boolean hasMethod = decision.methodName() != null && !decision.methodName().isBlank();
-        if ("ACTION_PROPOSAL".equals(decision.resultType()) != hasMethod) {
+        boolean hasOperations = decision.operations() != null && !decision.operations().isEmpty();
+        if ("ACTION_PROPOSAL".equals(decision.resultType()) != hasOperations) {
             throw new ApiException(HttpStatus.BAD_GATEWAY, "AI 변경안 형식이 올바르지 않습니다.");
+        }
+        if (hasOperations && decision.operations().size() > 50) {
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "AI 변경 작업은 한 번에 최대 50개까지 가능합니다.");
+        }
+        if (hasOperations
+                && decision.operations().stream()
+                        .anyMatch(
+                                operation ->
+                                        operation == null
+                                                || operation.methodName() == null
+                                                || operation.methodName().isBlank())) {
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "AI 변경 작업의 메서드가 비어 있습니다.");
         }
         if (!"ACTION_PROPOSAL".equals(decision.resultType())
                 && claimsDatabaseChangeCompleted(decision.answer())) {

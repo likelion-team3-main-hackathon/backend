@@ -291,8 +291,15 @@ public class ExpansionService {
         quantities.forEach(
                 (marketItemId, quantity) -> {
                     List<Map<String, Object>> found =
-                            db.queryForList(
-                                    "select market_item_id marketItemId,name,price unitPrice from market_items where market_item_id=? and provider_name=? and item_type='MEAL' and status in ('ACTIVE','PUBLISHED')",
+                            db.query(
+                                    "select market_item_id,name,price from market_items where market_item_id=? and provider_name=? and item_type='MEAL' and status in ('ACTIVE','PUBLISHED')",
+                                    (resultSet, rowNumber) -> {
+                                        Map<String, Object> product = new LinkedHashMap<>();
+                                        product.put("marketItemId", resultSet.getLong(1));
+                                        product.put("name", resultSet.getString(2));
+                                        product.put("unitPrice", resultSet.getLong(3));
+                                        return product;
+                                    },
                                     marketItemId,
                                     partner.trim());
                     if (found.isEmpty()) {

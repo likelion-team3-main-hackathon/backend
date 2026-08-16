@@ -26,6 +26,8 @@ import tri_lion.health.service.routine.RoutineService;
 
 @Service
 public class ChatActionService {
+    private static final String ACTION_PLAN = "CHAT_ACTION_PLAN";
+    private static final int MAX_OPERATIONS = 50;
     private static final Set<String> PATCH_EXERCISE_KEYS =
             Set.of(
                     "routineId",
@@ -39,6 +41,18 @@ public class ChatActionService {
                     "excludeFromAiAdjustment");
     private static final Set<String> PATCH_ROUTINE_KEYS =
             Set.of("routineId", "title", "description", "endDate", "aiAdjustmentAllowed", "status");
+    private static final Set<String> PATCH_ROUTINE_ITEM_KEYS =
+            Set.of(
+                    "routineId",
+                    "routineItemId",
+                    "title",
+                    "content",
+                    "targetValue",
+                    "targetUnit",
+                    "sets",
+                    "restSeconds",
+                    "memo",
+                    "excludeFromAiAdjustment");
     private static final Set<String> ADJUST_KEYS = Set.of("routineId", "reason", "userMessage");
     private static final Set<String> RECORD_KEYS =
             Set.of("routineItemId", "type", "details", "condition");
@@ -109,7 +123,7 @@ public class ChatActionService {
     @Transactional
     public PendingAiAction prepare(AiDecision decision) {
         Long userId = auth.sensitive().getId();
-        validate(decision.methodName(), decision.arguments());
+        validateOperations(decision.operations());
         String message =
                 decision.confirmationMessage() == null || decision.confirmationMessage().isBlank()
                         ? decision.answer()
@@ -121,8 +135,8 @@ public class ChatActionService {
             return pendingActions.save(
                     new PendingAiAction(
                             userId,
-                            decision.methodName(),
-                            json.writeValueAsString(decision.arguments()),
+                            ACTION_PLAN,
+                            json.writeValueAsString(Map.of("operations", decision.operations())),
                             message));
         } catch (Exception exception) {
             throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "AI 변경안을 저장하지 못했습니다.");
@@ -134,9 +148,13 @@ public class ChatActionService {
         Long userId = auth.sensitive().getId();
         PendingAiAction action = ownedForUpdate(actionId, userId);
         checkPending(action);
-        Map<String, Object> arguments = readArguments(action.getArgumentsJson());
-        validate(action.getMethodName(), arguments);
-        String result = execute(action, arguments);
+        List<AiOperation> operations = readOperations(action);
+        validateOperations(operations);
+        List<String> results = new ArrayList<>();
+        for (int index = 0; index < operations.size(); index++) {
+            results.add(execute(action, operations.get(index), index));
+        }
+        String result = String.join("\n", results);
         action.execute();
         pendingActions.saveAndFlush(action);
         history.saveActionResult(userId, action.getId(), result, "ACTION_EXECUTED");
@@ -176,6 +194,7 @@ public class ChatActionService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "AI 변경 인자가 없습니다.");
         }
         switch (methodName) {
+            case "routineService.patchRoutineItem" -> validatePatchRoutineItem(arguments);
             case "routineService.patchExercise" -> validatePatchExercise(arguments);
             case "routineService.patch" -> validatePatchRoutine(arguments);
             case "routineService.adjust" -> validateAdjust(arguments);
@@ -187,6 +206,45 @@ public class ChatActionService {
                     throw new ApiException(
                             HttpStatus.UNPROCESSABLE_ENTITY, "AI가 지원하지 않는 작업을 제안했습니다.");
         }
+    }
+
+    private void validateOperations(List<AiOperation> operations) {
+        if (operations == null || operations.isEmpty()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "실행할 AI 작업이 없습니다.");
+        }
+        if (operations.size() > MAX_OPERATIONS) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "한 번에 변경할 수 있는 작업은 최대 50개입니다.");
+        }
+        for (AiOperation operation : operations) {
+            if (operation == null
+                    || operation.methodName() == null
+                    || operation.methodName().isBlank()) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "AI 작업의 메서드명이 없습니다.");
+            }
+            validate(operation.methodName(), operation.arguments());
+        }
+    }
+
+    private void validatePatchRoutineItem(Map<String, Object> arguments) {
+        allowOnly(arguments, PATCH_ROUTINE_ITEM_KEYS);
+        Long routineId = requiredLong(arguments, "routineId");
+        Long routineItemId = requiredLong(arguments, "routineItemId");
+        Routine routine = routineService.owned(routineId);
+        routineService.requireContentMutable(routine);
+        ExerciseItem item =
+                routineItems
+                        .findByIdAndRoutineIdAndDeletedAtIsNull(routineItemId, routineId)
+                        .orElseThrow(() -> ApiException.notFound("루틴 항목을 찾을 수 없습니다."));
+        routineService.requirePendingItem(item);
+        requireAnyChange(arguments, Set.of("routineId", "routineItemId"));
+        nonBlankText(arguments, "title", 200);
+        maxText(arguments, "content", 5000);
+        maxText(arguments, "memo", 500);
+        decimalRange(arguments, "targetValue", new BigDecimal("0.1"), new BigDecimal("100000"));
+        integerRange(arguments, "sets", 1, 100);
+        integerRange(arguments, "restSeconds", 0, 3600);
+        String unit = optionalText(arguments, "targetUnit");
+        if (unit != null) enumValue(ExerciseItem.Unit.class, unit, "목표 단위");
     }
 
     private void validatePatchExercise(Map<String, Object> arguments) {
@@ -297,11 +355,13 @@ public class ChatActionService {
                 items);
     }
 
-    private String execute(PendingAiAction action, Map<String, Object> arguments) {
-        return switch (action.getMethodName()) {
+    private String execute(PendingAiAction action, AiOperation operation, int operationIndex) {
+        Map<String, Object> arguments = operation.arguments();
+        return switch (operation.methodName()) {
+            case "routineService.patchRoutineItem" -> executePatchRoutineItem(arguments);
             case "routineService.patchExercise" -> executePatchExercise(arguments);
             case "routineService.patch" -> executePatchRoutine(arguments);
-            case "routineService.adjust" -> executeAdjust(action, arguments);
+            case "routineService.adjust" -> executeAdjust(action, arguments, operationIndex);
             case "recordService.create" -> executeRecord(arguments);
             case "routineService.createGeneratedRoutine" -> executeCreateRoutine(arguments);
             case "routineService.personalizeCurriculum" -> executePersonalizeCurriculum(arguments);
@@ -310,6 +370,23 @@ public class ChatActionService {
                     throw new ApiException(
                             HttpStatus.UNPROCESSABLE_ENTITY, "AI가 지원하지 않는 작업을 제안했습니다.");
         };
+    }
+
+    private String executePatchRoutineItem(Map<String, Object> arguments) {
+        ExerciseItem item =
+                routineService.patchRoutineItem(
+                        requiredLong(arguments, "routineId"),
+                        requiredLong(arguments, "routineItemId"),
+                        new RoutineRequests.PatchRoutineItem(
+                                optionalText(arguments, "title"),
+                                optionalText(arguments, "content"),
+                                optionalDecimal(arguments, "targetValue"),
+                                optionalText(arguments, "targetUnit"),
+                                optionalInteger(arguments, "sets"),
+                                optionalInteger(arguments, "restSeconds"),
+                                optionalText(arguments, "memo"),
+                                optionalBoolean(arguments, "excludeFromAiAdjustment")));
+        return item.getName() + " 항목을 변경했습니다.";
     }
 
     private String executePatchExercise(Map<String, Object> arguments) {
@@ -343,7 +420,8 @@ public class ChatActionService {
         return routine.getTitle() + " 루틴을 변경했습니다.";
     }
 
-    private String executeAdjust(PendingAiAction action, Map<String, Object> arguments) {
+    private String executeAdjust(
+            PendingAiAction action, Map<String, Object> arguments, int operationIndex) {
         Long routineId = requiredLong(arguments, "routineId");
         AiJob job =
                 routineService.adjust(
@@ -351,7 +429,7 @@ public class ChatActionService {
                         new RoutineRequests.AdjustmentRequest(
                                 requiredText(arguments, "reason", 500),
                                 optionalText(arguments, "userMessage")),
-                        "chat-action-" + action.getId());
+                        "chat-action-" + action.getId() + "-" + operationIndex);
         return "루틴 재조정 작업을 요청했습니다. 작업 ID: " + job.getId();
     }
 
@@ -457,6 +535,24 @@ public class ChatActionService {
             return json.readValue(value, new TypeReference<>() {});
         } catch (Exception exception) {
             throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "저장된 변경안을 읽지 못했습니다.");
+        }
+    }
+
+    private List<AiOperation> readOperations(PendingAiAction action) {
+        Map<String, Object> stored = readArguments(action.getArgumentsJson());
+        if (!ACTION_PLAN.equals(action.getMethodName())) {
+            return List.of(new AiOperation(action.getMethodName(), stored));
+        }
+        try {
+            Object raw = stored.get("operations");
+            if (raw == null) {
+                throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "저장된 실행 계획이 없습니다.");
+            }
+            return json.convertValue(raw, new TypeReference<List<AiOperation>>() {});
+        } catch (ApiException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "저장된 실행 계획을 읽지 못했습니다.");
         }
     }
 

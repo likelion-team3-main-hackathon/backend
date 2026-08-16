@@ -22,16 +22,37 @@ public final class ChatDtos {
 
     public record LookupResult(String toolName, Map<String, Object> arguments, Object data) {}
 
+    public record AiOperation(String methodName, Map<String, Object> arguments) {
+        public AiOperation {
+            methodName = methodName == null ? "" : methodName;
+            arguments = arguments == null ? Map.of() : arguments;
+        }
+    }
+
     public record AiDecision(
             String resultType,
             String answer,
-            String methodName,
-            Map<String, Object> arguments,
+            List<AiOperation> operations,
             String confirmationMessage) {
         public AiDecision {
-            methodName = methodName == null ? "" : methodName;
-            arguments = arguments == null ? Map.of() : arguments;
+            operations = operations == null ? List.of() : List.copyOf(operations);
             confirmationMessage = confirmationMessage == null ? "" : confirmationMessage;
+        }
+
+        /** 기존 단일 작업 테스트와 내부 호출을 단계적으로 호환하기 위한 생성자입니다. */
+        public AiDecision(
+                String resultType,
+                String answer,
+                String methodName,
+                Map<String, Object> arguments,
+                String confirmationMessage) {
+            this(
+                    resultType,
+                    answer,
+                    methodName == null || methodName.isBlank()
+                            ? List.of()
+                            : List.of(new AiOperation(methodName, arguments)),
+                    confirmationMessage);
         }
     }
 

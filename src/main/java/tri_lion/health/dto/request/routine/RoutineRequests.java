@@ -49,6 +49,17 @@ public final class RoutineRequests {
             String memo,
             Boolean excludeFromAiAdjustment) {}
 
+    /** 챗봇이 운동과 식단을 같은 방식으로 안전하게 수정할 때 사용하는 공통 요청입니다. */
+    public record PatchRoutineItem(
+            String title,
+            String content,
+            BigDecimal targetValue,
+            String targetUnit,
+            Integer sets,
+            Integer restSeconds,
+            String memo,
+            Boolean excludeFromAiAdjustment) {}
+
     public record OrderRequest(@NotEmpty List<Long> exerciseIds) {}
 
     public record AdjustmentRequest(@NotBlank String reason, String userMessage) {}
