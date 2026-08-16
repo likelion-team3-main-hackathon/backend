@@ -125,11 +125,11 @@ Fake OCR/LLM은 네트워크 없이 결정적인 분석·루틴·코칭 결과�
 AI_PROVIDER=gemini
 GOOGLE_API_KEY=Google_AI_Studio에서_발급한_키
 GEMINI_MODEL_ANALYSIS=gemini-3.6-flash
-GEMINI_MODEL_ROUTINE=gemini-3.6-flash
+GEMINI_MODEL_ROUTINE=gemini-3.5-flash-lite
 GEMINI_MODEL_COACHING=gemini-3.5-flash-lite
-AI_PROMPT_DOCUMENT_EXTRACTION_VERSION=document-v2-body-parts
+AI_PROMPT_DOCUMENT_EXTRACTION_VERSION=document-v3-iso-measured-date
 AI_PROMPT_HEALTH_ANALYSIS_VERSION=health-v3-multi-document
-AI_PROMPT_ROUTINE_GENERATION_VERSION=routine-v6-day-summaries
+AI_PROMPT_ROUTINE_GENERATION_VERSION=routine-v7-explicit-date-range
 AI_PROMPT_RECORD_COACHING_VERSION=coaching-v2
 # 로컬 테스트에서 Gemini JSON 원문을 확인할 때만 true
 AI_DEBUG_LOG_RESPONSES=false
@@ -160,7 +160,7 @@ docker compose logs -f app | grep AI_DEBUG_RESPONSE
 
 프롬프트는 [`src/main/resources/prompts`](./src/main/resources/prompts) 아래에 기능·버전별 Markdown 파일로 관리합니다. 사용한 버전 파일은 수정하지 않고 새 파일을 추가한 뒤 대응하는 `AI_PROMPT_*_VERSION`만 변경합니다. 선택한 파일이 없거나 비어 있으면 애플리케이션은 잘못된 프롬프트로 요청하지 않고 시작 단계에서 실패합니다.
 
-완료된 분석과 AI 작업의 `promptVersion`에는 예를 들어 `routine-v6-day-summaries@1a2b3c4d5e6f`처럼 버전과 내용 SHA-256 앞 12자리가 저장됩니다. 건강 분석은 문서 추출과 종합 분석 두 프롬프트 버전을 `+`로 연결해 기록합니다. 프롬프트 변경 후에는 앱 컨테이너를 재생성해야 합니다.
+완료된 분석과 AI 작업의 `promptVersion`에는 예를 들어 `routine-v7-explicit-date-range@1a2b3c4d5e6f`처럼 버전과 내용 SHA-256 앞 12자리가 저장됩니다. 건강 분석은 문서 추출과 종합 분석 두 프롬프트 버전을 `+`로 연결해 기록합니다. 프롬프트 변경 후에는 앱 컨테이너를 재생성해야 합니다.
 
 AI 제한 기본값은 한국 시간 자정에 사용자별 일일 횟수가 갱신됩니다. 실제 Gemini HTTP 호출은 모든 사용자를 합쳐 분당 30회·하루 100회로 제한됩니다. 한도 초과 응답의 `Retry-After` 헤더만큼 기다린 뒤 재요청하세요. `.env`의 `AI_*_PER_*` 값으로 운영 환경에 맞게 조정할 수 있으며 제한 자체를 끄는 설정은 비용 위험이 있으므로 테스트 Fake 외에는 권장하지 않습니다.
 

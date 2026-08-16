@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.*;
+import java.time.temporal.ChronoUnit;
 import java.time.temporal.TemporalAdjusters;
 import java.util.*;
 import org.springframework.data.domain.Pageable;
@@ -21,6 +22,7 @@ import tri_lion.health.repository.record.RecordRepositories;
 import tri_lion.health.repository.routine.RoutineRepositories;
 import tri_lion.health.repository.user.UserRepositories;
 import tri_lion.health.security.AuthenticatedUser;
+import tri_lion.health.service.health.HealthAiTaskService;
 
 @Service
 public class AnalysisLabService {
@@ -57,7 +59,10 @@ public class AnalysisLabService {
         DateRange range = range(period, anchorDate);
         Map<String, Object> nutrition = nutrition(range.from(), range.to());
         Map<String, Object> exercise = exercise(range.from(), range.to());
-        Map<String, Object> body = bodyComposition(range.to().minusYears(1), range.to());
+        LocalDate bodyYearStart = range.to().withDayOfYear(1);
+        Map<String, Object> body =
+                bodyComposition(
+                        bodyYearStart, bodyYearStart.with(TemporalAdjusters.lastDayOfYear()));
         Map<String, Object> recentNutrition =
                 "WEEKLY".equals(range.type())
                         ? nutrition
@@ -120,8 +125,12 @@ public class AnalysisLabService {
         }
         int recordedDays = (int) daily.values().stream().filter(Nutrients::hasData).count();
         Nutrients total = daily.values().stream().reduce(Nutrients.zero(), Nutrients::plus);
-        Nutrients average = recordedDays == 0 ? Nutrients.zero() : total.divide(recordedDays);
-        Nutrients targets = nutritionTargets(userId, from, to);
+        int periodDays = Math.toIntExact(ChronoUnit.DAYS.between(from, to) + 1);
+        Nutrients average = total.divide(periodDays);
+        Nutrients recordedDayAverage =
+                recordedDays == 0 ? Nutrients.zero() : total.divide(recordedDays);
+        NutritionTarget target = nutritionTarget(userId);
+        Nutrients targets = target.nutrients();
         Integer score = recordedDays == 0 ? null : nutritionScore(average, targets);
         List<Map<String, Object>> trend = new ArrayList<>();
         for (LocalDate date = from; !date.isAfter(to); date = date.plusDays(1))
@@ -133,9 +142,16 @@ public class AnalysisLabService {
         result.put("from", from);
         result.put("to", to);
         result.put("recordedDays", recordedDays);
+        result.put("periodDays", periodDays);
+        result.put("averageBasis", "PERIOD_DAYS");
+        result.put(
+                "recordCoveragePercent",
+                (int) Math.round(recordedDays * 100.0 / Math.max(1, periodDays)));
         result.put("score", score);
         result.put("targets", nutrientMap(null, targets));
+        result.put("targetBasis", targetBasis(target));
         result.put("averages", nutrientMap(null, average));
+        result.put("recordedDayAverages", nutrientMap(null, recordedDayAverage));
         result.put("dailyTrend", trend);
         result.put("calorieRatio", calorieRatio(average));
         result.put("constraints", analysisArray("nutritionConstraints"));
@@ -251,6 +267,7 @@ public class AnalysisLabService {
     public Map<String, Object> bodyComposition(LocalDate from, LocalDate to) {
         validateRange(from, to);
         Long userId = auth.active().getId();
+        repairExtractedMeasurementDates(userId);
         List<HealthMeasurement> values =
                 measurements.findByUserIdAndCategoryAndMeasuredAtBetweenOrderByMeasuredAtAsc(
                         userId, "BODY_COMPOSITION", from, to);
@@ -295,7 +312,7 @@ public class AnalysisLabService {
                         .distinct()
                         .count();
         result.put("status", measurementCount < 2 ? "PARTIAL" : "AVAILABLE");
-        result.put("score", null);
+        result.put("score", bodyCompositionScore(userId, from, to, values));
         result.put("measurementCount", measurementCount);
         result.put("summary", bodySummary(latest, measurementCount));
         result.put("latest", latest);
@@ -305,6 +322,70 @@ public class AnalysisLabService {
                 "sourceDocumentIds",
                 values.stream().map(HealthMeasurement::getDocumentId).distinct().toList());
         return result;
+    }
+
+    private void repairExtractedMeasurementDates(Long userId) {
+        for (var document :
+                documents.findAllByUserIdAndDeletedAtIsNullOrderByCreatedAtDesc(userId)) {
+            if (document.getMeasuredAt() != null || document.getExtractedData() == null) continue;
+            LocalDate extractedDate =
+                    HealthAiTaskService.parseMeasuredDate(
+                            parse(document.getExtractedData()).path("measuredDate").asText(null));
+            if (extractedDate == null) continue;
+            document.measuredAt(extractedDate);
+            measurements
+                    .findByDocumentId(document.getId())
+                    .forEach(measurement -> measurement.measuredAt(extractedDate));
+        }
+    }
+
+    private Integer bodyCompositionScore(
+            Long userId, LocalDate from, LocalDate to, List<HealthMeasurement> values) {
+        LocalDate latestDate =
+                values.stream()
+                        .map(HealthMeasurement::getMeasuredAt)
+                        .filter(Objects::nonNull)
+                        .max(LocalDate::compareTo)
+                        .orElse(null);
+        if (latestDate == null) return null;
+        Optional<BigDecimal> reportedScore =
+                measurements
+                        .findByUserIdAndMetricCodeAndMeasuredAtBetweenOrderByMeasuredAtAsc(
+                                userId, "SCORE", from, to)
+                        .stream()
+                        .filter(value -> latestDate.equals(value.getMeasuredAt()))
+                        .map(HealthMeasurement::getNumericValue)
+                        .filter(Objects::nonNull)
+                        .max(BigDecimal::compareTo);
+        if (reportedScore.isPresent())
+            return Math.max(
+                    0,
+                    Math.min(
+                            100, reportedScore.get().setScale(0, RoundingMode.HALF_UP).intValue()));
+
+        Map<String, HealthMeasurement> ranged = new LinkedHashMap<>();
+        values.stream()
+                .filter(value -> latestDate.equals(value.getMeasuredAt()))
+                .filter(value -> value.getNumericValue() != null)
+                .filter(value -> value.getReferenceMin() != null && value.getReferenceMax() != null)
+                .filter(value -> value.getReferenceMax().compareTo(value.getReferenceMin()) > 0)
+                .forEach(value -> ranged.putIfAbsent(value.getMetricCode(), value));
+        if (ranged.isEmpty()) return null;
+        return (int)
+                Math.round(
+                        ranged.values().stream()
+                                .mapToDouble(this::referenceRangeScore)
+                                .average()
+                                .orElse(0));
+    }
+
+    private double referenceRangeScore(HealthMeasurement measurement) {
+        double value = measurement.getNumericValue().doubleValue();
+        double min = measurement.getReferenceMin().doubleValue();
+        double max = measurement.getReferenceMax().doubleValue();
+        if (value >= min && value <= max) return 100;
+        double distance = value < min ? min - value : value - max;
+        return Math.max(0, 100 - distance / (max - min) * 100);
     }
 
     private Map<String, Object> insufficientBody() {
@@ -385,6 +466,7 @@ public class AnalysisLabService {
 
     private String legacyBodyMetricCode(String label) {
         String value = label.toUpperCase(Locale.ROOT);
+        if (value.matches(".*(INBODY.*SCORE|SCORE|점수).*")) return "SCORE";
         if (value.matches(".*(체중|WEIGHT).*")) return "WEIGHT_KG";
         if (value.matches(".*(체지방률|BODY.*FAT.*PERCENT).*")) return "BODY_FAT_PERCENT";
         if (value.matches(".*(체지방량|BODY.*FAT.*MASS).*")) return "BODY_FAT_MASS_KG";
@@ -399,28 +481,143 @@ public class AnalysisLabService {
         return records.findByUserIdAndPerformedAtBetweenOrderByPerformedAtDesc(userId, start, end);
     }
 
-    private Nutrients nutritionTargets(Long userId, LocalDate from, LocalDate to) {
-        List<ExerciseItem> meals =
-                items.findScheduledForUser(userId, from, to).stream()
-                        .filter(item -> "MEAL".equals(item.getItemType()))
-                        .toList();
-        Map<LocalDate, Nutrients> daily = new HashMap<>();
-        for (ExerciseItem item : meals)
-            daily.merge(
-                    item.getScheduledDate(), nutrients(parse(item.getContent())), Nutrients::plus);
-        if (!daily.isEmpty())
-            return daily.values().stream()
-                    .reduce(Nutrients.zero(), Nutrients::plus)
-                    .divide(daily.size())
-                    .withDefaults();
+    private NutritionTarget nutritionTarget(Long userId) {
         HealthProfile profile = profiles.findById(userId).orElse(null);
+        Optional<HealthMeasurement> latestWeight = latestBodyMeasurement(userId, "WEIGHT_KG");
+        Optional<HealthMeasurement> latestBodyFat =
+                latestBodyMeasurement(userId, "BODY_FAT_PERCENT");
         double weight =
-                profile == null || profile.getWeightKg() == null
-                        ? 65
-                        : profile.getWeightKg().doubleValue();
-        double calories = weight * 30;
-        return new Nutrients(
-                calories, calories * .5 / 4, weight * 1.6, calories * .25 / 9, 2.3, 25);
+                latestWeight
+                        .map(HealthMeasurement::getNumericValue)
+                        .map(BigDecimal::doubleValue)
+                        .filter(value -> value > 0)
+                        .orElseGet(
+                                () ->
+                                        profile == null || profile.getWeightKg() == null
+                                                ? 65
+                                                : profile.getWeightKg().doubleValue());
+        String weightSource = latestWeight.isPresent() ? "BODY_COMPOSITION" : "HEALTH_PROFILE";
+        if (latestWeight.isEmpty() && (profile == null || profile.getWeightKg() == null))
+            weightSource = "DEFAULT";
+        double bodyFatPercent =
+                latestBodyFat
+                        .map(HealthMeasurement::getNumericValue)
+                        .map(BigDecimal::doubleValue)
+                        .orElse(0.0);
+        Set<String> goals = profileGoals(profile);
+        String primaryGoal = primaryNutritionGoal(goals);
+        double proteinMultiplier = proteinMultiplier(primaryGoal);
+        double proteinBasisWeight = proteinBasisWeight(profile, weight, bodyFatPercent);
+        double calories = dailyCalories(profile, weight, primaryGoal);
+        double protein = proteinBasisWeight * proteinMultiplier;
+        double fatRatio = "HEALTH_METRIC_MANAGEMENT".equals(primaryGoal) ? .30 : .25;
+        double fat = calories * fatRatio / 9;
+        double carbs = Math.max(0, (calories - protein * 4 - fat * 9) / 4);
+        double fiber = Math.max(25, calories / 1000 * 14);
+        return new NutritionTarget(
+                new Nutrients(calories, carbs, protein, fat, 2.0, fiber),
+                primaryGoal,
+                weight,
+                weightSource,
+                proteinBasisWeight,
+                proteinMultiplier,
+                bodyFatPercent > 0 ? bodyFatPercent : null);
+    }
+
+    private Optional<HealthMeasurement> latestBodyMeasurement(Long userId, String metricCode) {
+        return measurements
+                .findByUserIdAndMetricCodeAndMeasuredAtBetweenOrderByMeasuredAtAsc(
+                        userId, metricCode, LocalDate.of(1900, 1, 1), LocalDate.now(SEOUL))
+                .stream()
+                .filter(value -> "BODY_COMPOSITION".equals(value.getCategory()))
+                .filter(value -> value.getNumericValue() != null)
+                .max(
+                        Comparator.comparing(HealthMeasurement::getMeasuredAt)
+                                .thenComparing(HealthMeasurement::getId));
+    }
+
+    private Set<String> profileGoals(HealthProfile profile) {
+        if (profile == null) return Set.of();
+        JsonNode values = parse(profile.getGoals());
+        if (!values.isArray()) return Set.of();
+        Set<String> result = new LinkedHashSet<>();
+        values.forEach(value -> result.add(value.asText()));
+        return result;
+    }
+
+    static String primaryNutritionGoal(Set<String> goals) {
+        if (goals.contains("MUSCLE_GAIN")) return "MUSCLE_GAIN";
+        if (goals.contains("WEIGHT_LOSS")) return "WEIGHT_LOSS";
+        if (goals.contains("REHABILITATION")) return "REHABILITATION";
+        if (goals.contains("HEALTH_METRIC_MANAGEMENT")) return "HEALTH_METRIC_MANAGEMENT";
+        return "MAINTENANCE";
+    }
+
+    static double proteinMultiplier(String goal) {
+        return switch (goal) {
+            case "MUSCLE_GAIN", "WEIGHT_LOSS" -> 1.6;
+            case "REHABILITATION" -> 1.2;
+            default -> 1.0;
+        };
+    }
+
+    private double proteinBasisWeight(
+            HealthProfile profile, double currentWeight, double bodyFatPercent) {
+        if (profile == null || profile.getTargetWeightKg() == null) return currentWeight;
+        boolean highBodyFat =
+                bodyFatPercent >= ("FEMALE".equalsIgnoreCase(profile.getGender()) ? 35.0 : 25.0);
+        if (!highBodyFat) return currentWeight;
+        double targetWeight = profile.getTargetWeightKg().doubleValue();
+        return targetWeight > 0 ? Math.min(currentWeight, targetWeight) : currentWeight;
+    }
+
+    private double dailyCalories(HealthProfile profile, double weight, String goal) {
+        double maintenance;
+        if (profile == null || profile.getHeightCm() == null || profile.getBirthDate() == null) {
+            maintenance = weight * 30;
+        } else {
+            int age =
+                    Math.max(
+                            18,
+                            Period.between(profile.getBirthDate(), LocalDate.now(SEOUL))
+                                    .getYears());
+            double sexOffset =
+                    switch (Optional.ofNullable(profile.getGender()).orElse("")) {
+                        case "MALE" -> 5;
+                        case "FEMALE" -> -161;
+                        default -> -78;
+                    };
+            double bmr =
+                    10 * weight + 6.25 * profile.getHeightCm().doubleValue() - 5 * age + sexOffset;
+            double activityFactor =
+                    switch (Optional.ofNullable(profile.getActivityLevel()).orElse("LIGHT")) {
+                        case "SEDENTARY" -> 1.2;
+                        case "MODERATE" -> 1.55;
+                        case "ACTIVE" -> 1.725;
+                        default -> 1.375;
+                    };
+            maintenance = bmr * activityFactor;
+        }
+        double goalFactor =
+                switch (goal) {
+                    case "WEIGHT_LOSS" -> .85;
+                    case "MUSCLE_GAIN" -> 1.10;
+                    default -> 1.0;
+                };
+        return Math.max(1200, maintenance * goalFactor);
+    }
+
+    private Map<String, Object> targetBasis(NutritionTarget target) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("type", "PERSONALIZED_PROFILE");
+        result.put("goal", target.goal());
+        result.put("weightKg", rounded(target.weightKg()));
+        result.put("weightSource", target.weightSource());
+        result.put("proteinBasisWeightKg", rounded(target.proteinBasisWeightKg()));
+        result.put("proteinGramsPerKg", target.proteinGramsPerKg());
+        if (target.bodyFatPercent() != null)
+            result.put("bodyFatPercent", rounded(target.bodyFatPercent()));
+        return result;
     }
 
     private JsonNode parse(String value) {
@@ -557,12 +754,22 @@ public class AnalysisLabService {
 
     private BigDecimal latestValue(Map<String, List<HealthMeasurement>> byCode, String code) {
         List<HealthMeasurement> values = byCode.getOrDefault(code, List.of());
-        return values.isEmpty() ? null : values.getLast().getNumericValue();
+        return values.stream()
+                .max(
+                        Comparator.comparing(HealthMeasurement::getMeasuredAt)
+                                .thenComparing(HealthMeasurement::getId))
+                .map(HealthMeasurement::getNumericValue)
+                .orElse(null);
     }
 
     private List<Map<String, Object>> trend(List<HealthMeasurement> values) {
         if (values == null) return List.of();
-        return values.stream()
+        Map<LocalDate, HealthMeasurement> byDate = new TreeMap<>();
+        values.stream()
+                .filter(value -> value.getMeasuredAt() != null)
+                .sorted(Comparator.comparing(HealthMeasurement::getId))
+                .forEach(value -> byDate.put(value.getMeasuredAt(), value));
+        return byDate.values().stream()
                 .map(
                         value ->
                                 Map.<String, Object>of(
@@ -692,6 +899,15 @@ public class AnalysisLabService {
     }
 
     private record DateRange(String type, LocalDate from, LocalDate to) {}
+
+    private record NutritionTarget(
+            Nutrients nutrients,
+            String goal,
+            double weightKg,
+            String weightSource,
+            double proteinBasisWeightKg,
+            double proteinGramsPerKg,
+            Double bodyFatPercent) {}
 
     private record Nutrients(
             double calories,

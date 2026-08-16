@@ -15,6 +15,8 @@ public final class HealthRepositories {
         Page<HealthDocument> findByUserIdAndDeletedAtIsNullOrderByCreatedAtDesc(
                 Long id, Pageable p);
 
+        List<HealthDocument> findAllByUserIdAndDeletedAtIsNullOrderByCreatedAtDesc(Long id);
+
         Optional<HealthDocument> findByIdAndUserIdAndDeletedAtIsNull(Long id, Long user);
     }
 
@@ -33,11 +35,16 @@ public final class HealthRepositories {
     public interface Measurements extends JpaRepository<HealthMeasurement, Long> {
         void deleteByDocumentId(Long documentId);
 
+        List<HealthMeasurement> findByDocumentId(Long documentId);
+
         List<HealthMeasurement> findByUserIdAndCategoryAndMeasuredAtBetweenOrderByMeasuredAtAsc(
                 Long userId, String category, java.time.LocalDate from, java.time.LocalDate to);
 
         List<HealthMeasurement> findByUserIdAndCategoryOrderByMeasuredAtAsc(
                 Long userId, String category);
+
+        List<HealthMeasurement> findByUserIdAndMetricCodeAndMeasuredAtBetweenOrderByMeasuredAtAsc(
+                Long userId, String metricCode, java.time.LocalDate from, java.time.LocalDate to);
     }
 
     public interface Jobs extends JpaRepository<AiJob, Long> {

@@ -9,19 +9,21 @@ import org.springframework.core.io.DefaultResourceLoader;
 class PromptCatalogTests {
     @Test
     void loadsVersionedPromptsAndCreatesContentFingerprint() {
-        PromptCatalog prompts = catalog("routine-v6-day-summaries");
+        PromptCatalog prompts = catalog("routine-v7-explicit-date-range");
 
         assertThat(prompts.documentExtraction().content()).contains("sourceDocumentId");
+        assertThat(prompts.documentExtraction().content()).contains("YYYY-MM-DD", "인바디 점수");
         assertThat(prompts.healthAnalysis().content()).contains("routineRecommendations");
         assertThat(prompts.routineGeneration().content())
                 .contains(
-                        "totalDays - 1일",
-                        "days.length == durationWeeks * 7",
+                        "expectedEndDate",
+                        "days.length == totalDays",
                         "mealSummaryTitle",
                         "exerciseSummaryTitle");
+        assertThat(prompts.routineGeneration().content()).doesNotContain("2026-08-15");
         assertThat(prompts.recordCoaching().content()).contains("의료 진단");
         assertThat(prompts.routineGeneration().storedVersion())
-                .matches("routine-v6-day-summaries@[0-9a-f]{12}");
+                .matches("routine-v7-explicit-date-range@[0-9a-f]{12}");
     }
 
     @Test
@@ -41,7 +43,7 @@ class PromptCatalogTests {
     private PromptCatalog catalog(String routineVersion) {
         return new PromptCatalog(
                 new DefaultResourceLoader(),
-                "document-v1-multi",
+                "document-v3-iso-measured-date",
                 "health-v3-multi-document",
                 routineVersion,
                 "coaching-v2");

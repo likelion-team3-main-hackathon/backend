@@ -74,7 +74,7 @@ public class GeminiAiClients {
             GeminiGateway gateway,
             PromptCatalog prompts,
             @Value("${app.ai.models.analysis:gemini-3.6-flash}") String analysisModel,
-            @Value("${app.ai.models.routine:gemini-3.6-flash}") String routineModel,
+            @Value("${app.ai.models.routine:gemini-3.5-flash-lite}") String routineModel,
             @Value("${app.ai.models.coaching:gemini-3.5-flash-lite}") String coachingModel) {
         return new AiClients.LlmClient() {
             @Override

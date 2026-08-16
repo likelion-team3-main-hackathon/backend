@@ -10,6 +10,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.servlet.http.Cookie;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -299,6 +300,14 @@ class CoreFlowIntegrationTests {
                                 .header("Authorization", "Bearer " + access))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.recordedDays").value(1))
+                .andExpect(jsonPath("$.data.periodDays").value(7))
+                .andExpect(jsonPath("$.data.averageBasis").value("PERIOD_DAYS"))
+                .andExpect(jsonPath("$.data.recordCoveragePercent").value(14))
+                .andExpect(jsonPath("$.data.targetBasis.type").value("PERSONALIZED_PROFILE"))
+                .andExpect(jsonPath("$.data.targetBasis.goal").value("MAINTENANCE"))
+                .andExpect(jsonPath("$.data.targetBasis.weightSource").value("HEALTH_PROFILE"))
+                .andExpect(jsonPath("$.data.targetBasis.proteinGramsPerKg").value(1.0))
+                .andExpect(jsonPath("$.data.targets.proteinGrams").value(58.2))
                 .andExpect(jsonPath("$.data.dailyTrend.length()").value(7));
         mvc.perform(
                         get("/api/v1/analysis-labs/exercise?from=2026-08-05&to=2026-08-11")
@@ -306,8 +315,13 @@ class CoreFlowIntegrationTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.completedSets").isNumber())
                 .andExpect(jsonPath("$.data.muscleGroupVolumes").isArray());
+        LocalDate bodyCompositionTo = LocalDate.now();
+        LocalDate bodyCompositionFrom = bodyCompositionTo.minusYears(1);
         mvc.perform(
-                        get("/api/v1/analysis-labs/body-composition?from=2025-08-15&to=2026-08-15")
+                        get("/api/v1/analysis-labs/body-composition?from="
+                                        + bodyCompositionFrom
+                                        + "&to="
+                                        + bodyCompositionTo)
                                 .header("Authorization", "Bearer " + access))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("INSUFFICIENT_DATA"))
@@ -317,14 +331,20 @@ class CoreFlowIntegrationTests {
                 "기존 체성분 분석",
                 "{\"bodyCompositionFindings\":[{\"sourceDocumentId\":"
                         + documentId
-                        + ",\"label\":\"체지방률\",\"value\":27.4,\"unit\":\"%\",\"interpretation\":\"기존 분석값\"}]}");
+                        + ",\"label\":\"체지방률\",\"value\":27.4,\"unit\":\"%\",\"interpretation\":\"기존 분석값\"},{\"sourceDocumentId\":"
+                        + documentId
+                        + ",\"label\":\"인바디 점수\",\"value\":82,\"unit\":\"점\",\"interpretation\":\"검사지 점수\"}]}");
         analysisRepository.saveAndFlush(legacyAnalysis);
         entityManager.clear();
         mvc.perform(
-                        get("/api/v1/analysis-labs/body-composition?from=2025-08-15&to=2026-08-15")
+                        get("/api/v1/analysis-labs/body-composition?from="
+                                        + bodyCompositionFrom
+                                        + "&to="
+                                        + bodyCompositionTo)
                                 .header("Authorization", "Bearer " + access))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("PARTIAL"))
+                .andExpect(jsonPath("$.data.score").value(82))
                 .andExpect(jsonPath("$.data.latest.bodyFatPercent").value(27.4));
         assertThat(
                         db.queryForObject(

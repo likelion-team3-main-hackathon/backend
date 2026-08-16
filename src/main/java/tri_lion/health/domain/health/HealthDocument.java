@@ -97,6 +97,10 @@ public class HealthDocument {
         extractionFailureReason = null;
     }
 
+    public void measuredAt(LocalDate value) {
+        if (value != null) measuredAt = value;
+    }
+
     public void fail() {
         processingStatus = Status.FAILED;
     }

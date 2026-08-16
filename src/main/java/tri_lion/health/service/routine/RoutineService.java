@@ -382,6 +382,7 @@ public class RoutineService {
     private String routineInput(AiJob job, JsonNode request) throws Exception {
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("request", request);
+        input.putAll(routineDateRange(request));
         Analysis analysis =
                 request.hasNonNull("analysisId")
                         ? analyses.findByIdAndUserId(
@@ -427,6 +428,15 @@ public class RoutineService {
             input.put("protectedItems", protectedItems);
         }
         return json.writeValueAsString(input);
+    }
+
+    static Map<String, Object> routineDateRange(JsonNode request) {
+        LocalDate startDate = LocalDate.parse(request.path("startDate").asText());
+        int totalDays = Math.multiplyExact(request.path("durationWeeks").asInt(), 7);
+        return Map.of(
+                "startDate", startDate.toString(),
+                "expectedEndDate", startDate.plusDays(totalDays - 1L).toString(),
+                "totalDays", totalDays);
     }
 
     private String dailySummariesJson(RoutinePlan plan) throws Exception {

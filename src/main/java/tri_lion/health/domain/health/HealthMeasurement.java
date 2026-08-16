@@ -93,4 +93,8 @@ public class HealthMeasurement {
         this.sourceText = sourceText;
         createdAt = Instant.now();
     }
+
+    public void measuredAt(LocalDate value) {
+        if (value != null) measuredAt = value;
+    }
 }

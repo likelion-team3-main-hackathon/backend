@@ -101,7 +101,10 @@ public class HealthAiTaskService {
                     documents.findByIdAndUserIdAndDeletedAtIsNull(documentId, userId).orElseThrow();
             document.extracted(node.toString(), modelVersion, promptVersion);
             measurements.deleteByDocumentId(documentId);
-            LocalDate measuredAt = parseDate(node.path("measuredDate").asText(null));
+            LocalDate extractedMeasuredAt =
+                    parseMeasuredDate(node.path("measuredDate").asText(null));
+            if (extractedMeasuredAt != null) document.measuredAt(extractedMeasuredAt);
+            LocalDate measuredAt = extractedMeasuredAt;
             if (measuredAt == null) measuredAt = document.getMeasuredAt();
             if (measuredAt == null)
                 measuredAt = LocalDate.ofInstant(document.getCreatedAt(), ZoneId.of("Asia/Seoul"));
@@ -130,9 +133,14 @@ public class HealthAiTaskService {
         }
     }
 
-    private LocalDate parseDate(String value) {
+    public static LocalDate parseMeasuredDate(String value) {
         try {
-            return value == null || value.isBlank() ? null : LocalDate.parse(value);
+            if (value == null || value.isBlank()) return null;
+            String normalized = value.trim();
+            if (normalized.length() >= 10
+                    && normalized.substring(0, 10).matches("\\d{4}-\\d{2}-\\d{2}"))
+                return LocalDate.parse(normalized.substring(0, 10));
+            return LocalDate.parse(normalized);
         } catch (Exception ignored) {
             return null;
         }
@@ -191,7 +199,8 @@ public class HealthAiTaskService {
                         "SKELETAL_MUSCLE_MASS_KG",
                         "SEGMENTAL_LEAN_MASS_KG",
                         "SEGMENTAL_FAT_MASS_KG",
-                        "BMI")
+                        "BMI",
+                        "SCORE")
                 .contains(code);
     }
 
