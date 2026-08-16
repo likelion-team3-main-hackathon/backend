@@ -48,7 +48,7 @@ public class RoutineService {
             AuthenticatedUser u,
             ObjectMapper o,
             JdbcTemplate db,
-            AiClients.LlmClient llm, 
+            AiClients.LlmClient llm,
             AiRequestLimitService limits) {
         routines = r;
         items = i;
@@ -1371,7 +1371,6 @@ public class RoutineService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "영상 URL은 HTTPS만 허용합니다.");
     }
 
-<<<<<<< HEAD
     private void validateStatusTransition(Routine.Status current, String requestedStatus) {
         if (requestedStatus == null) return;
         Routine.Status next;
@@ -1400,10 +1399,7 @@ public class RoutineService {
         }
     }
 
-    private DayView dayView(LocalDate date, List<ExerciseItem> dayItems) {
-=======
     private DayView dayView(LocalDate date, List<ExerciseItem> dayItems, JsonNode summary) {
->>>>>>> origin/routine-details
         ExerciseItem first = dayItems.getFirst();
         Map<Long, List<ExerciseItem>> bySection = new LinkedHashMap<>();
         dayItems.forEach(

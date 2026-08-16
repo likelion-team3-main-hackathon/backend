@@ -36,32 +36,32 @@ public class RecordService {
     private final HealthRepositories.Jobs jobs;
     private final AuthenticatedUser auth;
     private final ObjectMapper json;
-private final ObjectStorage storage;
-private final JdbcTemplate db;
-private final AiRequestLimitService limits;
+    private final ObjectStorage storage;
+    private final JdbcTemplate db;
+    private final AiRequestLimitService limits;
 
-public RecordService(
-        RecordRepositories.Records r,
-        RecordRepositories.Coachings c,
-        RoutineRepositories.Items i,
-        RoutineRepositories.Routines routines,
-        HealthRepositories.Jobs j,
-        AuthenticatedUser a,
-        ObjectMapper o,
-        ObjectStorage storage,
-        JdbcTemplate db,
-        AiRequestLimitService limits) {
-    records = r;
-    coachings = c;
-    items = i;
-    this.routines = routines;
-    jobs = j;
-    auth = a;
-    json = o;
-    this.storage = storage;
-    this.db = db;
-    this.limits = limits;
-}
+    public RecordService(
+            RecordRepositories.Records r,
+            RecordRepositories.Coachings c,
+            RoutineRepositories.Items i,
+            RoutineRepositories.Routines routines,
+            HealthRepositories.Jobs j,
+            AuthenticatedUser a,
+            ObjectMapper o,
+            ObjectStorage storage,
+            JdbcTemplate db,
+            AiRequestLimitService limits) {
+        records = r;
+        coachings = c;
+        items = i;
+        this.routines = routines;
+        jobs = j;
+        auth = a;
+        json = o;
+        this.storage = storage;
+        this.db = db;
+        this.limits = limits;
+    }
 
     @Transactional
     public ActivityRecord create(RecordRequest q) {

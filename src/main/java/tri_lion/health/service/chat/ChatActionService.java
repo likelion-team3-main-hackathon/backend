@@ -135,6 +135,7 @@ public class ChatActionService {
         validate(action.getMethodName(), arguments);
         String result = execute(action, arguments);
         action.execute();
+        pendingActions.saveAndFlush(action);
         return new ActionResultResponse(action.getId(), action.getStatus().name(), result, null);
     }
 
@@ -144,6 +145,7 @@ public class ChatActionService {
         PendingAiAction action = ownedForUpdate(actionId, userId);
         checkPending(action);
         action.cancel();
+        pendingActions.saveAndFlush(action);
         return new ActionResultResponse(
                 action.getId(), action.getStatus().name(), "변경을 취소했습니다.", null);
     }
