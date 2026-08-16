@@ -161,6 +161,28 @@ public class ChatHistoryService {
         conversation.addMessage(null);
     }
 
+    @Transactional
+    public void saveActionResult(
+            Long userId, Long pendingActionId, String content, String responseType) {
+        messages.findFirstByPendingActionIdOrderByIdDesc(pendingActionId)
+                .ifPresent(
+                        proposal -> {
+                            ChatConversation conversation =
+                                    owned(proposal.getConversationId(), userId);
+                            messages.save(
+                                    new ChatMessage(
+                                            conversation.getId(),
+                                            ChatMessage.SenderRole.ASSISTANT,
+                                            content,
+                                            responseType,
+                                            pendingActionId,
+                                            false,
+                                            null,
+                                            null));
+                            conversation.addMessage(null);
+                        });
+    }
+
     @Transactional(readOnly = true)
     public ChatImage image(Long userId, Long messageId) {
         ChatMessage message =

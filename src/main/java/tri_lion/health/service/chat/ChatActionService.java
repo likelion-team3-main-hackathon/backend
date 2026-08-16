@@ -83,6 +83,7 @@ public class ChatActionService {
     private final RoutineService routineService;
     private final RecordService recordService;
     private final ExpansionService expansionService;
+    private final ChatHistoryService history;
     private final AuthenticatedUser auth;
     private final ObjectMapper json;
 
@@ -92,6 +93,7 @@ public class ChatActionService {
             RoutineService routineService,
             RecordService recordService,
             ExpansionService expansionService,
+            ChatHistoryService history,
             AuthenticatedUser auth,
             ObjectMapper json) {
         this.pendingActions = pendingActions;
@@ -99,6 +101,7 @@ public class ChatActionService {
         this.routineService = routineService;
         this.recordService = recordService;
         this.expansionService = expansionService;
+        this.history = history;
         this.auth = auth;
         this.json = json;
     }
@@ -136,6 +139,7 @@ public class ChatActionService {
         String result = execute(action, arguments);
         action.execute();
         pendingActions.saveAndFlush(action);
+        history.saveActionResult(userId, action.getId(), result, "ACTION_EXECUTED");
         return new ActionResultResponse(action.getId(), action.getStatus().name(), result, null);
     }
 
@@ -146,6 +150,7 @@ public class ChatActionService {
         checkPending(action);
         action.cancel();
         pendingActions.saveAndFlush(action);
+        history.saveActionResult(userId, action.getId(), "변경을 취소했습니다.", "ACTION_CANCELLED");
         return new ActionResultResponse(
                 action.getId(), action.getStatus().name(), "변경을 취소했습니다.", null);
     }

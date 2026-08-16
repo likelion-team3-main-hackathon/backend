@@ -31,6 +31,8 @@ public final class ChatRepositories {
     }
 
     public interface Messages extends JpaRepository<ChatMessage, Long> {
+        Optional<ChatMessage> findFirstByPendingActionIdOrderByIdDesc(Long pendingActionId);
+
         List<ChatMessage> findByConversationIdOrderByIdDesc(Long conversationId, Pageable pageable);
 
         List<ChatMessage> findByConversationIdAndIdLessThanOrderByIdDesc(
