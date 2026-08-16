@@ -20,10 +20,14 @@ class ChatServiceFlowTests {
         GeminiChatClient gemini = mock(GeminiChatClient.class);
         AiReadToolService readTools = mock(AiReadToolService.class);
         ChatActionService actions = mock(ChatActionService.class);
-        ChatService service = new ChatService(auth, gemini, readTools, actions, new ObjectMapper());
+        ChatHistoryService history = mock(ChatHistoryService.class);
+        ChatService service =
+                new ChatService(auth, gemini, readTools, actions, history, new ObjectMapper());
 
         when(auth.sensitive()).thenReturn(user);
         when(user.getId()).thenReturn(7L);
+        when(history.resolve(7L, null)).thenReturn(55L);
+        when(history.aiHistory(7L, 55L, 10)).thenReturn("[]");
         when(gemini.plan("안녕", "[]", false)).thenReturn(new QueryPlan("LOOKUP", "", List.of()));
         when(readTools.execute(7L, List.of())).thenReturn(List.of());
         when(gemini.decide("안녕", "[]", List.of(), null))
@@ -33,9 +37,12 @@ class ChatServiceFlowTests {
 
         assertThat(response.responseType()).isEqualTo("ANSWER");
         assertThat(response.message()).isEqualTo("안녕하세요.");
+        assertThat(response.conversationId()).isEqualTo(55L);
         verify(gemini).plan("안녕", "[]", false);
         verify(readTools).execute(7L, List.of());
         verify(gemini).decide("안녕", "[]", List.of(), null);
+        verify(history).saveUserMessage(7L, 55L, "안녕", null);
+        verify(history).saveAssistantMessage(7L, 55L, "안녕하세요.", "ANSWER", null);
         verifyNoInteractions(actions);
     }
 }

@@ -24,6 +24,7 @@ public class ChatService {
     private final GeminiChatClient gemini;
     private final AiReadToolService readTools;
     private final ChatActionService actions;
+    private final ChatHistoryService history;
     private final ObjectMapper json;
 
     public ChatService(
@@ -31,15 +32,22 @@ public class ChatService {
             GeminiChatClient gemini,
             AiReadToolService readTools,
             ChatActionService actions,
+            ChatHistoryService history,
             ObjectMapper json) {
         this.auth = auth;
         this.gemini = gemini;
         this.readTools = readTools;
         this.actions = actions;
+        this.history = history;
         this.json = json;
     }
 
     public ChatResponse chat(String message, String historyJson, MultipartFile image) {
+        return chat(message, historyJson, image, null);
+    }
+
+    public ChatResponse chat(
+            String message, String historyJson, MultipartFile image, Long requestedConversationId) {
         boolean hasText = StringUtils.hasText(message);
         boolean hasImage = image != null && !image.isEmpty();
         if (!hasText && !hasImage) {
@@ -50,9 +58,13 @@ public class ChatService {
         }
         if (hasImage) validateImage(image);
 
-        String safeHistory = validateHistory(historyJson);
         Long userId = auth.sensitive().getId();
         String question = hasText ? message.trim() : "이 사진을 내 상태와 루틴을 고려해 설명해줘.";
+        Long conversationId = history.resolve(userId, requestedConversationId);
+        String storedHistory = history.aiHistory(userId, conversationId, MAX_HISTORY_MESSAGES);
+        String safeHistory =
+                "[]".equals(storedHistory) ? validateHistory(historyJson) : storedHistory;
+        history.saveUserMessage(userId, conversationId, question, image);
 
         QueryPlan plan = gemini.plan(question, safeHistory, hasImage);
         validatePlan(plan);
@@ -61,17 +73,47 @@ public class ChatService {
         AiDecision decision = gemini.decide(question, safeHistory, results, image);
         validateDecision(decision);
 
+        ChatResponse response;
         if ("ANSWER".equals(decision.resultType())
                 || "CLARIFICATION".equals(decision.resultType())) {
-            return ChatResponse.answer(decision.resultType(), decision.answer());
+            response =
+                    ChatResponse.answer(decision.resultType(), decision.answer(), conversationId);
+        } else {
+            PendingAiAction action = actions.prepare(decision);
+            String confirmation =
+                    decision.confirmationMessage() == null
+                                    || decision.confirmationMessage().isBlank()
+                            ? decision.answer()
+                            : decision.confirmationMessage();
+            response = ChatResponse.proposal(confirmation, action.getId(), conversationId);
         }
+        history.saveAssistantMessage(
+                userId,
+                conversationId,
+                response.message(),
+                response.responseType(),
+                response.pendingActionId());
+        return response;
+    }
 
-        PendingAiAction action = actions.prepare(decision);
-        String confirmation =
-                decision.confirmationMessage() == null || decision.confirmationMessage().isBlank()
-                        ? decision.answer()
-                        : decision.confirmationMessage();
-        return ChatResponse.proposal(confirmation, action.getId());
+    public ConversationSummary createConversation() {
+        return history.create(auth.sensitive().getId());
+    }
+
+    public List<ConversationSummary> conversations() {
+        return history.list(auth.sensitive().getId());
+    }
+
+    public MessagePage messages(Long conversationId, Long beforeMessageId, int limit) {
+        return history.messages(auth.sensitive().getId(), conversationId, beforeMessageId, limit);
+    }
+
+    public void deleteConversation(Long conversationId) {
+        history.delete(auth.sensitive().getId(), conversationId);
+    }
+
+    public ChatImage image(Long messageId) {
+        return history.image(auth.sensitive().getId(), messageId);
     }
 
     private void validatePlan(QueryPlan plan) {
