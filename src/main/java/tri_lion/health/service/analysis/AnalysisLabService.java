@@ -478,7 +478,8 @@ public class AnalysisLabService {
     private List<ActivityRecord> rangeRecords(Long userId, LocalDate from, LocalDate to) {
         Instant start = from.atStartOfDay(SEOUL).toInstant();
         Instant end = to.plusDays(1).atStartOfDay(SEOUL).toInstant();
-        return records.findByUserIdAndPerformedAtBetweenOrderByPerformedAtDesc(userId, start, end);
+        return records.findByUserIdAndPerformedAtBetweenOrderByPerformedAtDescCreatedAtDesc(
+                userId, start, end);
     }
 
     private NutritionTarget nutritionTarget(Long userId) {

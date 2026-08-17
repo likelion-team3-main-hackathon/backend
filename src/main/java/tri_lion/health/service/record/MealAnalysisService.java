@@ -108,7 +108,7 @@ public class MealAnalysisService {
         Instant from = date.atStartOfDay(zone).toInstant();
         Instant to = date.plusDays(1).atStartOfDay(zone).toInstant();
         Totals consumed = new Totals();
-        for (ActivityRecord record : records.findByUserIdAndTypeAndPerformedAtBetweenOrderByPerformedAtDesc(userId, ActivityType.MEAL, from, to)) {
+        for (ActivityRecord record : records.findByUserIdAndTypeAndPerformedAtBetweenOrderByPerformedAtDescCreatedAtDesc(userId, ActivityType.MEAL, from, to)) {
             try { consumed.add(json.readTree(record.getDetails())); } catch (Exception ignored) {}
         }
         Totals target = plannedTarget(userId, date);

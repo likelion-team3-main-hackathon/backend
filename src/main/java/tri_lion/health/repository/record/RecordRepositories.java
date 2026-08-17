@@ -14,10 +14,10 @@ public final class RecordRepositories {
         Optional<ActivityRecord> findFirstByUserIdAndRoutineItemIdAndStatus(
                 Long u, Long i, String s);
 
-        List<ActivityRecord> findByUserIdAndPerformedAtBetweenOrderByPerformedAtDesc(
+        List<ActivityRecord> findByUserIdAndPerformedAtBetweenOrderByPerformedAtDescCreatedAtDesc(
                 Long u, Instant a, Instant b);
 
-        List<ActivityRecord> findByUserIdAndTypeAndPerformedAtBetweenOrderByPerformedAtDesc(
+        List<ActivityRecord> findByUserIdAndTypeAndPerformedAtBetweenOrderByPerformedAtDescCreatedAtDesc(
                 Long u, ActivityType type, Instant a, Instant b);
     }
 
