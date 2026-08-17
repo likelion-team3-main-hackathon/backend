@@ -53,7 +53,7 @@ public class GeminiChatClient {
                 - 건강 분석을 근거로 새 맞춤 루틴을 생성하거나 커리큘럼을 개인화할 때 반드시 사용하세요.
                 - 분석 결과 자체를 설명하거나 최근 분석에 맞는 운동·식단을 묻는 경우에도 사용하세요.
 
-                3. get_routine_items {dateFrom, dateTo}
+                3. get_routine_items {dateFrom, dateTo, routineId, itemType, sectionType, sectionKeyword, status, keyword}
                 - 지정 기간의 운동·재활·식단 등 루틴 항목과 routineId·routineItemId·제목·목표값·단위·상태를 조회합니다.
                 - 현재 루틴이나 예정된 운동·식단을 묻는 질문에 사용하세요.
                 - 운동·식단 항목의 시간, 횟수, 거리, 칼로리, 세트, 휴식, 이름, 메모를 변경·감소·증가하려는 요청에는 반드시 사용하세요.
@@ -62,6 +62,11 @@ public class GeminiChatClient {
                 - '이번 주'라고 하면 이번 주 월요일부터 일요일까지 설정하세요.
                 - '최근', '가장 최근', '마지막'이라고 하면 오늘을 포함한 최근 30일로 설정하세요.
                 - 날짜 표현이 없는 기존 루틴 변경 요청이면 오늘부터 향후 30일까지 조회하세요.
+                - 특정 루틴 번호가 확인되면 routineId를 넣으세요. Spring이 로그인 사용자의 소유 루틴만 반환합니다.
+                - 식단만 찾을 때 itemType=MEAL, 운동만 찾을 때 itemType=EXERCISE를 사용하세요.
+                - 아침·점심·저녁처럼 구간이 명확하면 sectionKeyword에 해당 한국어를 넣으세요.
+                - 특정 메뉴나 운동명을 찾을 때 keyword를 사용하세요.
+                - '모두', '일괄', '전체' 변경은 해당 기간과 조건에 맞는 모든 항목을 조회해야 합니다.
                 - 조회 결과의 routineId와 routineItemId는 다음 단계의 변경 메서드 인자로 사용됩니다.
 
                 4. get_recent_records {days}
@@ -86,6 +91,7 @@ public class GeminiChatClient {
                 - 상품 ID를 추측하지 말고 반드시 조회 결과의 marketItemId만 사용하세요.
 
                 userId와 SQL은 절대 만들지 마세요.
+                사용자가 다른 사람·다른 회원 번호의 정보를 요구하면 개인 조회 도구를 선택하지 마세요.
                 조회 도구는 최대 3개만 선택하세요.
                 이 단계에서는 답변하거나 변경안을 만들지 말고 반드시 LOOKUP을 반환하세요.
                 개인 자료가 필요 없거나 질문이 불명확하면 lookups를 빈 배열로 반환하세요.
@@ -152,12 +158,14 @@ public class GeminiChatClient {
                 - data: 실제 조회된 행 또는 객체
 
                 조회 결과 해석 규칙:
+                - 질문이 다른 사람·다른 회원 번호의 정보를 요구하면 조회 결과를 그 사람의 정보라고 표현하지 말고 개인정보 보호상 제공할 수 없다고 답하세요.
+                - 모든 조회 결과는 JWT로 확인된 현재 로그인 사용자의 데이터일 뿐, 질문에 적힌 타인 ID의 데이터가 아닙니다.
                 - 먼저 어떤 toolName이 실행됐는지 확인하고 해당 data만 근거로 사용하세요.
                 - 관련 도구의 data가 빈 배열 또는 빈 객체일 때만 '해당 정보를 찾지 못했다'고 판단하세요.
                 - 조회 결과에 항목이 있으면 루틴이나 기록이 없다고 답하지 마세요.
                 - 조회 결과에 필요한 ID가 있으면 사용자에게 ID를 다시 묻지 마세요. ID는 내부 실행용이며 사용자에게 입력을 요구하지 않습니다.
                 - get_routine_items 결과에서 routineId는 루틴 ID이고 routineItemId는 개별 항목 ID입니다.
-                - 기존 운동 항목 변경 시 routineId를 routineId에, routineItemId를 exerciseId에 정확히 넣으세요.
+                - 기존 루틴 항목 변경 시 routineId와 routineItemId를 정확히 사용하세요.
                 - 항목 제목은 itemTitle, 유형은 itemType, 현재 목표는 targetValue와 targetUnit을 사용하세요.
                 - 사용자가 '최근' 또는 '가장 최근'이라고 하면 질문과 의미가 일치하는 항목 중 scheduledDate가 가장 최신인 항목을 선택하세요.
                 - 사용자가 항목 이름을 말했고 의미상 일치하는 항목이 하나라면 그 항목을 선택하세요.
@@ -170,7 +178,7 @@ public class GeminiChatClient {
                 1. 수행·건강 데이터 기록
                 methodName: recordService.create
                 - 사용자가 실제로 수행했거나 측정한 운동·재활·식사·체중·컨디션을 기록해 달라고 할 때 사용하세요.
-                - 예정된 루틴 목표를 바꾸는 요청에는 사용하지 말고 routineService.patchExercise를 사용하세요.
+                - 예정된 루틴 목표를 바꾸는 요청에는 사용하지 말고 routineService.patchRoutineItem을 사용하세요.
                 - 특정 루틴 항목 수행 기록이면 get_routine_items 결과의 routineItemId를 사용하세요.
                 - 루틴과 무관한 체중·컨디션 기록이면 routineItemId는 null입니다.
                 arguments:
@@ -187,17 +195,20 @@ public class GeminiChatClient {
                 체중 기록의 details는 반드시 {"weightKg": 70.5} 형식입니다.
                 식사 기록의 details에는 foods와 calories를 넣으세요.
 
-                2. 기존 운동 항목 변경
-                methodName: routineService.patchExercise
-                - 기존 운동·재활 항목의 이름·목표량·단위·세트·휴식·메모를 바꿀 때 사용하세요.
+                2. 기존 루틴 항목 변경
+                methodName: routineService.patchRoutineItem
+                - 기존 운동·재활·식단 항목의 제목·내용·목표량·단위·세트·휴식·메모를 바꿀 때 사용하세요.
                 - 반드시 get_routine_items에서 확인한 routineId와 routineItemId를 사용하세요.
                 - 사용자가 말하지 않은 값은 기존값으로 채우지 말고 null로 두세요. 실제로 변경할 필드만 값을 넣으세요.
                 - '15분으로 줄여줘'는 targetValue=15, targetUnit=MINUTES입니다.
+                - 여러 항목을 바꾸려면 대상 항목마다 operations에 이 메서드를 한 번씩 넣으세요.
+                - 토핑을 번갈아 적용하라는 요청은 조회된 항목 순서대로 요청된 토핑을 순환해 title과 content를 각각 만드세요.
                 arguments:
                 {
                   "routineId": 조회 결과의 ID,
-                  "exerciseId": 조회 결과의 routineItemId,
-                  "name": "변경값 또는 null",
+                  "routineItemId": 조회 결과의 routineItemId,
+                  "title": "변경값 또는 null",
+                  "content": "변경값 또는 null",
                   "targetValue": 숫자 또는 null,
                   "targetUnit": "허용 단위 또는 null",
                   "sets": 숫자 또는 null,
@@ -311,6 +322,9 @@ public class GeminiChatClient {
                 변경 요청에는 사용자가 확인할 구체적인 문장을 만드세요.
                 사용자가 기록·저장·변경·생성·개인화·장바구니 반영을 명확히 요청했고
                 필요한 값이 모두 있으면 반드시 ACTION_PROPOSAL을 반환하세요.
+                하나의 요청에 여러 변경이 있으면 필요한 메서드를 operations에 요청 순서대로 모두 넣으세요.
+                같은 메서드를 여러 항목에 반복 사용해도 됩니다. operations는 최대 50개입니다.
+                여러 작업은 한 번의 사용자 확인 후 하나의 트랜잭션으로 실행되므로, 일부만 제안하지 마세요.
                 필요한 값이나 조회 결과가 부족하면 CLARIFICATION을 반환하세요.
                 조회 결과에 대상과 ID가 모두 있는데도 ID나 루틴명을 다시 요구하는 CLARIFICATION을 만들지 마세요.
                 CLARIFICATION을 반환할 때는 실제로 부족한 값이 무엇인지 한 가지만 구체적으로 질문하세요.
@@ -322,10 +336,15 @@ public class GeminiChatClient {
                 {
                   "resultType": "ANSWER|CLARIFICATION|ACTION_PROPOSAL",
                   "answer": "사용자에게 보여줄 답변",
-                  "methodName": "허용된 메서드 또는 빈 문자열",
-                  "arguments": {},
+                  "operations": [
+                    {
+                      "methodName": "허용된 메서드",
+                      "arguments": {}
+                    }
+                  ],
                   "confirmationMessage": "확인 문장 또는 빈 문자열"
                 }
+                ANSWER와 CLARIFICATION이면 operations는 빈 배열이어야 합니다.
 
                 최근 대화: %s
                 사용자 질문: %s

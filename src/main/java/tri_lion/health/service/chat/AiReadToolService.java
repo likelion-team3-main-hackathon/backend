@@ -5,6 +5,9 @@ import static tri_lion.health.dto.chat.ChatDtos.*;
 import java.sql.Timestamp;
 import java.time.*;
 import java.util.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -13,6 +16,7 @@ import tri_lion.health.exception.ApiException;
 
 @Service
 public class AiReadToolService {
+    private static final Logger log = LoggerFactory.getLogger(AiReadToolService.class);
     private static final Set<String> ALLOWED_TOOLS =
             Set.of(
                     "get_health_summary",
@@ -26,7 +30,16 @@ public class AiReadToolService {
             Map.of(
                     "get_health_summary", Set.of(),
                     "get_latest_analysis", Set.of(),
-                    "get_routine_items", Set.of("dateFrom", "dateTo"),
+                    "get_routine_items",
+                            Set.of(
+                                    "dateFrom",
+                                    "dateTo",
+                                    "routineId",
+                                    "itemType",
+                                    "sectionType",
+                                    "sectionKeyword",
+                                    "status",
+                                    "keyword"),
                     "get_recent_records", Set.of("days"),
                     "get_active_curricula", Set.of(),
                     "get_curriculum_detail", Set.of("curriculumId"),
@@ -56,11 +69,21 @@ public class AiReadToolService {
                 throw new ApiException(
                         HttpStatus.UNPROCESSABLE_ENTITY, "AI 조회에 허용되지 않은 조건이 포함되어 있습니다.");
             }
-            results.add(
-                    new LookupResult(
-                            request.toolName(),
-                            arguments,
-                            run(userId, request.toolName(), arguments)));
+            try {
+                results.add(
+                        new LookupResult(
+                                request.toolName(),
+                                arguments,
+                                run(userId, request.toolName(), arguments)));
+            } catch (DataAccessException exception) {
+                log.error(
+                        "AI read tool failed: tool={}, userId={}",
+                        request.toolName(),
+                        userId,
+                        exception);
+                throw new ApiException(
+                        HttpStatus.SERVICE_UNAVAILABLE, "개인화 데이터를 조회하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+            }
         }
         return results;
     }
@@ -177,13 +200,17 @@ public class AiReadToolService {
 
     private List<Map<String, Object>> routineItems(Long userId, Map<String, Object> arguments) {
         LocalDate from = date(arguments, "dateFrom", LocalDate.now(ZoneId.of("Asia/Seoul")));
-        LocalDate to = date(arguments, "dateTo", from);
+        LocalDate to =
+                date(
+                        arguments,
+                        "dateTo",
+                        arguments.containsKey("routineId") ? from.plusDays(30) : from);
         if (to.isBefore(from) || to.isAfter(from.plusDays(30))) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "루틴 조회 범위는 최대 31일입니다.");
         }
-
-        return db.queryForList(
-                """
+        StringBuilder sql =
+                new StringBuilder(
+                        """
                 select routine_id routineId,
                        routine_title routineTitle,
                        routine_goal routineGoal,
@@ -191,6 +218,8 @@ public class AiReadToolService {
                        ai_adjustment_allowed aiAdjustmentAllowed,
                        routine_item_id routineItemId,
                        section_id sectionId,
+                       section_type sectionType,
+                       section_title sectionTitle,
                        item_type itemType,
                        item_title itemTitle,
                        content,
@@ -206,12 +235,55 @@ public class AiReadToolService {
                 from ai_routine_item_view
                 where user_id=?
                   and scheduled_date between ? and ?
-                order by scheduled_date, sequence
-                limit 200
-                """,
-                userId,
-                from,
-                to);
+                """);
+        List<Object> parameters = new ArrayList<>(List.of(userId, from, to));
+        if (arguments.containsKey("routineId")) {
+            sql.append(" and routine_id=?");
+            parameters.add(positiveLong(arguments, "routineId"));
+        }
+        addExactFilter(sql, parameters, arguments, "itemType", "item_type");
+        addExactFilter(sql, parameters, arguments, "sectionType", "section_type");
+        addExactFilter(sql, parameters, arguments, "status", "item_status");
+        addLikeFilter(sql, parameters, arguments, "sectionKeyword", "section_title");
+        if (arguments.containsKey("keyword")) {
+            String keyword = requiredFilterValue(arguments.get("keyword"), "keyword");
+            sql.append(
+                    " and (lower(item_title) like ? or lower(coalesce(content,'')) like ? or lower(coalesce(section_title,'')) like ?)");
+            String pattern = "%" + keyword.toLowerCase(Locale.ROOT) + "%";
+            parameters.add(pattern);
+            parameters.add(pattern);
+            parameters.add(pattern);
+        }
+        sql.append(" order by scheduled_date, sequence limit 200");
+        return db.queryForList(sql.toString(), parameters.toArray());
+    }
+
+    private void addExactFilter(
+            StringBuilder sql,
+            List<Object> parameters,
+            Map<String, Object> arguments,
+            String argumentName,
+            String columnName) {
+        if (!arguments.containsKey(argumentName)) return;
+        String value =
+                requiredFilterValue(arguments.get(argumentName), argumentName)
+                        .toUpperCase(Locale.ROOT);
+        sql.append(" and ").append(columnName).append("=?");
+        parameters.add(value);
+    }
+
+    private void addLikeFilter(
+            StringBuilder sql,
+            List<Object> parameters,
+            Map<String, Object> arguments,
+            String argumentName,
+            String columnName) {
+        if (!arguments.containsKey(argumentName)) return;
+        String value =
+                requiredFilterValue(arguments.get(argumentName), argumentName)
+                        .toLowerCase(Locale.ROOT);
+        sql.append(" and lower(coalesce(").append(columnName).append(",'')) like ?");
+        parameters.add("%" + value + "%");
     }
 
     private Map<String, Object> recentRecords(Long userId, Map<String, Object> arguments) {
@@ -314,6 +386,14 @@ public class AiReadToolService {
         String keyword = String.valueOf(value).trim().replace("%", "").replace("_", "");
         if (keyword.isBlank()) return null;
         return keyword.length() > 50 ? keyword.substring(0, 50) : keyword;
+    }
+
+    private String requiredFilterValue(Object value, String argumentName) {
+        String sanitized = sanitizeKeyword(value);
+        if (sanitized == null) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, argumentName + " 값이 비어 있습니다.");
+        }
+        return sanitized;
     }
 
     private LocalDate date(Map<String, Object> arguments, String key, LocalDate defaultValue) {

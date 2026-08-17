@@ -1291,6 +1291,26 @@ public class RoutineService {
     }
 
     @Transactional
+    public ExerciseItem patchRoutineItem(
+            Long routineId, Long routineItemId, RoutineRequests.PatchRoutineItem q) {
+        requireContentMutable(owned(routineId));
+        ExerciseItem item =
+                items.findByIdAndRoutineIdAndDeletedAtIsNull(routineItemId, routineId)
+                        .orElseThrow(() -> ApiException.notFound("루틴 항목을 찾을 수 없습니다."));
+        requirePendingItem(item);
+        item.patchItem(
+                q.title(),
+                q.content(),
+                q.targetValue(),
+                q.targetUnit(),
+                q.sets(),
+                q.restSeconds(),
+                q.memo(),
+                q.excludeFromAiAdjustment());
+        return item;
+    }
+
+    @Transactional
     public void deleteExercise(Long r, Long i) {
         requireContentMutable(owned(r));
         items.findByIdAndRoutineIdAndDeletedAtIsNull(i, r)

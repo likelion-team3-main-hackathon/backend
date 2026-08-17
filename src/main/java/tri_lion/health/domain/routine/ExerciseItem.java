@@ -213,6 +213,19 @@ public class ExerciseItem {
         editedBy = Routine.Editor.USER;
     }
 
+    public void patchItem(
+            String title,
+            String content,
+            BigDecimal value,
+            String unit,
+            Integer sets,
+            Integer rest,
+            String memo,
+            Boolean exclude) {
+        if (content != null) this.content = content;
+        patch(title, value, unit, sets, rest, null, null, memo, exclude);
+    }
+
     public void order(int i) {
         sortOrder = i;
     }

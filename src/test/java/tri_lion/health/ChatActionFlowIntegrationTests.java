@@ -103,7 +103,7 @@ class ChatActionFlowIntegrationTests {
         long routineId = createRoutine();
         long itemId =
                 db.queryForObject(
-                        "select routine_item_id from routine_items where personalized_routine_id=?",
+                        "select routine_item_id from routine_items where personalized_routine_id=? and item_type='EXERCISE'",
                         Long.class,
                         routineId);
 
@@ -359,6 +359,69 @@ class ChatActionFlowIntegrationTests {
         actions.cancel(weightProposal.getId());
         assertThatThrownBy(() -> actions.confirm(weightProposal.getId()))
                 .hasMessageContaining("이미 처리된 변경안");
+    }
+
+    @Test
+    void combinesSeveralRoutineItemChangesIntoOneConfirmedActionPlan() {
+        long routineId = createRoutine();
+        long mealItemId =
+                db.queryForObject(
+                        "select routine_item_id from routine_items where personalized_routine_id=? and item_type='MEAL'",
+                        Long.class,
+                        routineId);
+        long exerciseItemId =
+                db.queryForObject(
+                        "select routine_item_id from routine_items where personalized_routine_id=? and item_type='EXERCISE'",
+                        Long.class,
+                        routineId);
+
+        AiDecision plan =
+                new AiDecision(
+                        "ACTION_PROPOSAL",
+                        "두 항목을 한 번에 바꿉니다.",
+                        List.of(
+                                new AiOperation(
+                                        "routineService.patchRoutineItem",
+                                        Map.of(
+                                                "routineId",
+                                                routineId,
+                                                "routineItemId",
+                                                mealItemId,
+                                                "title",
+                                                "그릭 요거트와 초코 토핑",
+                                                "content",
+                                                "그릭 요거트, 초코 토핑")),
+                                new AiOperation(
+                                        "routineService.patchRoutineItem",
+                                        Map.of(
+                                                "routineId",
+                                                routineId,
+                                                "routineItemId",
+                                                exerciseItemId,
+                                                "targetValue",
+                                                15,
+                                                "targetUnit",
+                                                "MINUTES"))),
+                        "두 항목을 함께 변경할까요?");
+
+        var proposal = actions.prepare(plan);
+        assertThat(proposal.getMethodName()).isEqualTo("CHAT_ACTION_PLAN");
+        assertThat(proposal.getArgumentsJson()).contains("operations");
+
+        actions.confirm(proposal.getId());
+
+        assertThat(
+                        db.queryForObject(
+                                "select title from routine_items where routine_item_id=?",
+                                String.class,
+                                mealItemId))
+                .isEqualTo("그릭 요거트와 초코 토핑");
+        assertThat(
+                        db.queryForObject(
+                                "select target_value from routine_items where routine_item_id=?",
+                                BigDecimal.class,
+                                exerciseItemId))
+                .isEqualByComparingTo("15.00");
     }
 
     private long createRoutine() {

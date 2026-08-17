@@ -1,5 +1,5 @@
 ALTER TABLE chat_messages
-    DROP CHECK chk_chat_message_response_type;
+    DROP CONSTRAINT chk_chat_message_response_type;
 
 ALTER TABLE chat_messages
     ADD CONSTRAINT chk_chat_message_response_type
