@@ -1,6 +1,7 @@
 package tri_lion.health.service.routine;
 
 import com.fasterxml.jackson.databind.*;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.math.BigDecimal;
 import java.time.*;
 import java.util.*;
@@ -76,6 +77,13 @@ public class RoutineService {
                                                 HttpStatus.UNPROCESSABLE_ENTITY,
                                                 "루틴 생성에 필요한 온보딩 또는 건강 분석 정보가 부족합니다."));
         validateRecommendationSelection(req, a);
+        Set<Long> allReplacedRoutineIds = new LinkedHashSet<>();
+        if (req.replacedMealRoutineIds() != null) allReplacedRoutineIds.addAll(req.replacedMealRoutineIds());
+        if (req.replacedExerciseRoutineIds() != null)
+            allReplacedRoutineIds.addAll(req.replacedExerciseRoutineIds());
+        for (Long targetRoutineId : allReplacedRoutineIds) {
+            requireActive(owned(targetRoutineId));
+        }
         limits.lockJobCreation();
         if (key != null) {
             var old =
@@ -129,22 +137,78 @@ public class RoutineService {
             int exerciseDays = Math.max(0, n.path("exerciseDaysPerWeek").asInt(3));
             Long previous =
                     n.hasNonNull("previousRoutineId") ? n.get("previousRoutineId").asLong() : null;
-            Routine.Type routineType =
-                    mealCount > 0 && exerciseDays > 0
-                            ? Routine.Type.MIXED
-                            : mealCount > 0 ? Routine.Type.MEAL : Routine.Type.EXERCISE;
-            String title = previous != null ? "재조정 " + plan.title() : plan.title();
-            Routine r =
-                    new Routine(
-                            job.getUserId(),
-                            title,
-                            plan.description(),
-                            start,
-                            weeks,
-                            previous,
-                            routineType);
-            r.dailySummaries(dailySummariesJson(plan));
-            r = routines.save(r);
+            List<Long> replacedMealIds = readLongList(n, "replacedMealRoutineIds");
+            List<Long> replacedExerciseIds = readLongList(n, "replacedExerciseRoutineIds");
+            boolean hasExercisePlan =
+                    plan.days().stream().anyMatch(day -> !safeExercises(day).isEmpty());
+
+            // 교체 대상으로 지정된 기존 루틴이 있으면 새 루틴을 따로 만들지 않고 그 루틴 안에서
+            // 식단/운동 부분만 새 내용으로 바꾼다(같은 "루틴"으로 유지, 별도 탭이 새로 생기지 않게).
+            Routine mealTarget =
+                    replacedMealIds.isEmpty()
+                            ? null
+                            : routines
+                                    .findById(replacedMealIds.get(0))
+                                    .filter(x -> x.getStatus() == Routine.Status.ACTIVE)
+                                    .orElse(null);
+            Routine exerciseTarget =
+                    replacedExerciseIds.isEmpty()
+                            ? null
+                            : routines
+                                    .findById(replacedExerciseIds.get(0))
+                                    .filter(x -> x.getStatus() == Routine.Status.ACTIVE)
+                                    .orElse(null);
+
+            Set<Long> affectedRoutineIds = new LinkedHashSet<>();
+            affectedRoutineIds.addAll(replacedMealIds);
+            affectedRoutineIds.addAll(replacedExerciseIds);
+            Map<Long, Routine> affectedRoutines = new LinkedHashMap<>();
+            for (Long targetId : affectedRoutineIds) {
+                routines
+                        .findById(targetId)
+                        .filter(x -> x.getStatus() == Routine.Status.ACTIVE)
+                        .ifPresent(
+                                target -> {
+                                    affectedRoutines.put(targetId, target);
+                                    boolean removeMeal = replacedMealIds.contains(targetId);
+                                    boolean removeExercise = replacedExerciseIds.contains(targetId);
+                                    for (ExerciseItem item :
+                                            items.findByRoutineIdAndDeletedAtIsNullOrderBySortOrder(
+                                                    targetId)) {
+                                        boolean isMeal = "MEAL".equals(item.getItemType());
+                                        if ((isMeal && removeMeal) || (!isMeal && removeExercise))
+                                            item.delete();
+                                    }
+                                });
+            }
+
+            boolean needsNewRoutineForMeal = mealCount > 0 && mealTarget == null;
+            boolean needsNewRoutineForExercise = hasExercisePlan && exerciseTarget == null;
+            Routine r = null;
+            if (needsNewRoutineForMeal || needsNewRoutineForExercise) {
+                Routine.Type routineType =
+                        needsNewRoutineForMeal && needsNewRoutineForExercise
+                                ? Routine.Type.MIXED
+                                : needsNewRoutineForMeal ? Routine.Type.MEAL : Routine.Type.EXERCISE;
+                String title = previous != null ? "재조정 " + plan.title() : plan.title();
+                r =
+                        new Routine(
+                                job.getUserId(),
+                                title,
+                                plan.description(),
+                                start,
+                                weeks,
+                                previous,
+                                routineType);
+                r = routines.save(r);
+                r.dailySummaries(
+                        mergeDailySummaries(
+                                r, plan, needsNewRoutineForMeal, needsNewRoutineForExercise));
+            }
+
+            Routine mealDestination = mealTarget != null ? mealTarget : r;
+            Routine exerciseDestination = exerciseTarget != null ? exerciseTarget : r;
+
             List<RoutineDayPlan> plannedDays =
                     plan.days().stream()
                             .sorted(Comparator.comparing(RoutineDayPlan::scheduledDate))
@@ -155,11 +219,32 @@ public class RoutineService {
                         Math.toIntExact(java.time.temporal.ChronoUnit.DAYS.between(start, date));
                 int week = dayIndex / 7 + 1;
                 if (mealCount > 0)
-                    saveMealDay(r, date, week, dayIndex, mealCount, plannedDay.meals());
+                    saveMealDay(
+                            mealDestination, date, week, dayIndex, mealCount, plannedDay.meals());
                 if (!safeExercises(plannedDay).isEmpty())
-                    saveExerciseDay(r, date, week, dayIndex, safeExercises(plannedDay));
+                    saveExerciseDay(
+                            exerciseDestination, date, week, dayIndex, safeExercises(plannedDay));
             }
-            if (previous != null) {
+
+            LocalDate planEnd = start.plusWeeks(weeks).minusDays(1);
+            if (mealTarget != null
+                    && exerciseTarget != null
+                    && Objects.equals(mealTarget.getId(), exerciseTarget.getId())) {
+                mealTarget.dailySummaries(mergeDailySummaries(mealTarget, plan, true, true));
+                mealTarget.extendEndDate(planEnd);
+            } else {
+                if (mealTarget != null) {
+                    mealTarget.dailySummaries(mergeDailySummaries(mealTarget, plan, true, false));
+                    mealTarget.extendEndDate(planEnd);
+                }
+                if (exerciseTarget != null) {
+                    exerciseTarget.dailySummaries(
+                            mergeDailySummaries(exerciseTarget, plan, false, true));
+                    exerciseTarget.extendEndDate(planEnd);
+                }
+            }
+
+            if (previous != null && r != null) {
                 for (ExerciseItem protectedItem :
                         items.findByRoutineIdAndDeletedAtIsNullOrderBySortOrder(previous).stream()
                                 .filter(ExerciseItem::isExcludeFromAiAdjustment)
@@ -191,13 +276,39 @@ public class RoutineService {
                                     protectedItem.getEditedBy()));
                 }
             }
+
+            for (Long targetId : affectedRoutineIds) {
+                Routine target = affectedRoutines.get(targetId);
+                if (target == null) continue;
+                List<ExerciseItem> remainingItems =
+                        items.findByRoutineIdAndDeletedAtIsNullOrderBySortOrder(targetId);
+                boolean hasMealLeft =
+                        remainingItems.stream().anyMatch(item -> "MEAL".equals(item.getItemType()));
+                boolean hasExerciseLeft =
+                        remainingItems.stream()
+                                .anyMatch(item -> !"MEAL".equals(item.getItemType()));
+                if (!hasMealLeft && !hasExerciseLeft) target.markReplaced();
+                else target.recomputeType(hasMealLeft, hasExerciseLeft);
+                routines.save(target);
+            }
+
+            Long resultRoutineId =
+                    r != null
+                            ? r.getId()
+                            : mealTarget != null ? mealTarget.getId() : exerciseTarget.getId();
             AiJob persistedJob = jobs.findForUpdateById(snapshot.id()).orElseThrow();
-            persistedJob.result(r.getId());
+            persistedJob.result(resultRoutineId);
             persistedJob.complete(llm.routineModelVersion(), llm.routinePromptVersion());
-            return r.getId();
+            return resultRoutineId;
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }
+    }
+
+    private List<Long> readLongList(JsonNode n, String field) {
+        List<Long> ids = new ArrayList<>();
+        if (n.hasNonNull(field)) n.get(field).forEach(idNode -> ids.add(idNode.asLong()));
+        return ids;
     }
 
     private String preferredMovementType(JsonNode preferredTypes) {
@@ -807,13 +918,25 @@ public class RoutineService {
                 "totalDays", totalDays);
     }
 
-    private String dailySummariesJson(RoutinePlan plan) throws Exception {
-        var root = json.createObjectNode();
+    private String mergeDailySummaries(
+            Routine target, RoutinePlan plan, boolean includeMeal, boolean includeExercise)
+            throws Exception {
+        JsonNode existing = parseDailySummaries(target.getDailySummaries());
+        ObjectNode root = existing.isObject() ? (ObjectNode) existing : json.createObjectNode();
         for (RoutineDayPlan day : plan.days()) {
-            var summary = root.putObject(day.scheduledDate().toString());
-            summary.put("mealTitle", Optional.ofNullable(day.mealSummaryTitle()).orElse(""));
-            summary.put(
-                    "exerciseTitle", Optional.ofNullable(day.exerciseSummaryTitle()).orElse(""));
+            String key = day.scheduledDate().toString();
+            ObjectNode entry =
+                    root.has(key) && root.get(key).isObject()
+                            ? (ObjectNode) root.get(key)
+                            : root.putObject(key);
+            if (includeMeal)
+                entry.put("mealTitle", Optional.ofNullable(day.mealSummaryTitle()).orElse(""));
+            else if (!entry.has("mealTitle")) entry.put("mealTitle", "");
+            if (includeExercise)
+                entry.put(
+                        "exerciseTitle",
+                        Optional.ofNullable(day.exerciseSummaryTitle()).orElse(""));
+            else if (!entry.has("exerciseTitle")) entry.put("exerciseTitle", "");
         }
         return json.writeValueAsString(root);
     }

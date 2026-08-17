@@ -17,7 +17,9 @@ public final class RoutineRequests {
             @Min(0) @Max(7) int exerciseDaysPerWeek,
             List<String> preferredExerciseTypes,
             boolean includeExpertContents,
-            @Size(max = 2) List<String> selectedRecommendationIds) {}
+            @Size(max = 2) List<String> selectedRecommendationIds,
+            @Size(max = 2) List<Long> replacedMealRoutineIds,
+            @Size(max = 2) List<Long> replacedExerciseRoutineIds) {}
 
     public record PatchRoutine(
             String title,
