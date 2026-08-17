@@ -17,6 +17,8 @@ public class PromptCatalog {
     private final VersionedPrompt healthAnalysis;
     private final VersionedPrompt routineGeneration;
     private final VersionedPrompt recordCoaching;
+    private final VersionedPrompt mealPhoto;
+    private final VersionedPrompt poseAnalysis;
 
     public PromptCatalog(
             ResourceLoader resources,
@@ -27,11 +29,17 @@ public class PromptCatalog {
             @Value("${app.ai.prompts.routine-generation-version:routine-v7-explicit-date-range}")
                     String routineGenerationVersion,
             @Value("${app.ai.prompts.record-coaching-version:coaching-v2}")
-                    String recordCoachingVersion) {
+                    String recordCoachingVersion,
+            @Value("${app.ai.prompts.meal-photo-version:meal-photo-v1}")
+                    String mealPhotoVersion,
+            @Value("${app.ai.prompts.pose-analysis-version:pose-analysis-v2}")
+                    String poseAnalysisVersion) {
         documentExtraction = load(resources, "document-extraction", documentExtractionVersion);
         healthAnalysis = load(resources, "health-analysis", healthAnalysisVersion);
         routineGeneration = load(resources, "routine-generation", routineGenerationVersion);
         recordCoaching = load(resources, "record-coaching", recordCoachingVersion);
+        mealPhoto = load(resources, "meal-photo", mealPhotoVersion);
+        poseAnalysis = load(resources, "pose-analysis", poseAnalysisVersion);
     }
 
     public VersionedPrompt documentExtraction() {
@@ -48,6 +56,14 @@ public class PromptCatalog {
 
     public VersionedPrompt recordCoaching() {
         return recordCoaching;
+    }
+
+    public VersionedPrompt mealPhoto() {
+        return mealPhoto;
+    }
+
+    public VersionedPrompt poseAnalysis() {
+        return poseAnalysis;
     }
 
     private VersionedPrompt load(ResourceLoader resources, String type, String version) {

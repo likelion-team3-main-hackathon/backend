@@ -15,6 +15,8 @@ spring:
       hibernate.jdbc.time_zone: UTC
   flyway:
     enabled: true
+    # V5/V6 are being developed on another branch; allow them to apply after this V7 lands.
+    out-of-order: true
   servlet:
     multipart:
       max-file-size: 10MB
@@ -62,15 +64,18 @@ app:
     read-timeout-seconds: ${AI_READ_TIMEOUT_SECONDS:180}
     debug-log-responses: ${AI_DEBUG_LOG_RESPONSES:false}
     models:
-
       analysis: ${GEMINI_MODEL_ANALYSIS:gemini-3.6-flash}
       routine: ${GEMINI_MODEL_ROUTINE:gemini-3.5-flash-lite}
       coaching: ${GEMINI_MODEL_COACHING:gemini-3.5-flash-lite}
+      meal-photo: ${GEMINI_MODEL_MEAL_PHOTO:gemini-3.5-flash-lite}
+      pose-analysis: ${GEMINI_MODEL_POSE_ANALYSIS:gemini-3.5-flash-lite}
     prompts:
       document-extraction-version: ${AI_PROMPT_DOCUMENT_EXTRACTION_VERSION:document-v3-iso-measured-date}
       health-analysis-version: ${AI_PROMPT_HEALTH_ANALYSIS_VERSION:health-v3-multi-document}
       routine-generation-version: ${AI_PROMPT_ROUTINE_GENERATION_VERSION:routine-v7-explicit-date-range}
       record-coaching-version: ${AI_PROMPT_RECORD_COACHING_VERSION:coaching-v2}
+      meal-photo-version: ${AI_PROMPT_MEAL_PHOTO_VERSION:meal-photo-v1}
+      pose-analysis-version: ${AI_PROMPT_POSE_ANALYSIS_VERSION:pose-analysis-v2}
     gemini:
       api-key: ${GOOGLE_API_KEY:${GEMINI_API_KEY:}}
       base-url: ${GEMINI_BASE_URL:https://generativelanguage.googleapis.com/v1beta}

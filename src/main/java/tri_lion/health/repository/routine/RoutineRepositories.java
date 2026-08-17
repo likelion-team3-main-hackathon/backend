@@ -42,5 +42,8 @@ public final class RoutineRepositories {
                 @Param("userId") Long userId,
                 @Param("from") LocalDate from,
                 @Param("to") LocalDate to);
+
+        List<ExerciseItem> findByRoutineIdAndScheduledDateAndItemTypeAndDeletedAtIsNull(
+                Long routineId, LocalDate scheduledDate, String itemType);
     }
 }
