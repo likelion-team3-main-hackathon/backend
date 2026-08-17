@@ -97,6 +97,7 @@ public class ChatActionService {
     private final RoutineService routineService;
     private final RecordService recordService;
     private final ExpansionService expansionService;
+    private final ChatbotExpansionService chatbotExpansion;
     private final ChatHistoryService history;
     private final AuthenticatedUser auth;
     private final ObjectMapper json;
@@ -107,6 +108,7 @@ public class ChatActionService {
             RoutineService routineService,
             RecordService recordService,
             ExpansionService expansionService,
+            ChatbotExpansionService chatbotExpansion,
             ChatHistoryService history,
             AuthenticatedUser auth,
             ObjectMapper json) {
@@ -115,6 +117,7 @@ public class ChatActionService {
         this.routineService = routineService;
         this.recordService = recordService;
         this.expansionService = expansionService;
+        this.chatbotExpansion = chatbotExpansion;
         this.history = history;
         this.auth = auth;
         this.json = json;
@@ -202,6 +205,20 @@ public class ChatActionService {
             case "routineService.createGeneratedRoutine" -> validateCreateRoutine(arguments);
             case "routineService.personalizeCurriculum" -> validatePersonalizeCurriculum(arguments);
             case "expansionService.createMealCart" -> validateMealCart(arguments);
+            case "chatbotExpansion.patchWellnessProfile",
+                    "chatbotExpansion.batchPatchRoutineItems",
+                    "chatbotExpansion.rescheduleRoutineItems",
+                    "chatbotExpansion.shiftRoutineItemTimes",
+                    "chatbotExpansion.deleteRoutineItems",
+                    "chatbotExpansion.updateActivityRecord",
+                    "chatbotExpansion.deleteActivityRecord",
+                    "chatbotExpansion.deleteHealthRecord",
+                    "chatbotExpansion.pauseRoutine",
+                    "chatbotExpansion.resumeRoutine",
+                    "chatbotExpansion.keepOnlyRoutineActive",
+                    "chatbotExpansion.updateNotificationSettings",
+                    "chatbotExpansion.registerChatImageAndAnalyze" ->
+                    chatbotExpansion.validate(methodName, arguments);
             default ->
                     throw new ApiException(
                             HttpStatus.UNPROCESSABLE_ENTITY, "AI가 지원하지 않는 작업을 제안했습니다.");
@@ -366,6 +383,20 @@ public class ChatActionService {
             case "routineService.createGeneratedRoutine" -> executeCreateRoutine(arguments);
             case "routineService.personalizeCurriculum" -> executePersonalizeCurriculum(arguments);
             case "expansionService.createMealCart" -> executeMealCart(arguments);
+            case "chatbotExpansion.patchWellnessProfile",
+                    "chatbotExpansion.batchPatchRoutineItems",
+                    "chatbotExpansion.rescheduleRoutineItems",
+                    "chatbotExpansion.shiftRoutineItemTimes",
+                    "chatbotExpansion.deleteRoutineItems",
+                    "chatbotExpansion.updateActivityRecord",
+                    "chatbotExpansion.deleteActivityRecord",
+                    "chatbotExpansion.deleteHealthRecord",
+                    "chatbotExpansion.pauseRoutine",
+                    "chatbotExpansion.resumeRoutine",
+                    "chatbotExpansion.keepOnlyRoutineActive",
+                    "chatbotExpansion.updateNotificationSettings",
+                    "chatbotExpansion.registerChatImageAndAnalyze" ->
+                    chatbotExpansion.execute(operation.methodName(), arguments);
             default ->
                     throw new ApiException(
                             HttpStatus.UNPROCESSABLE_ENTITY, "AI가 지원하지 않는 작업을 제안했습니다.");

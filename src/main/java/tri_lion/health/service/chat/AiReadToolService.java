@@ -25,12 +25,24 @@ public class AiReadToolService {
                     "get_recent_records",
                     "get_active_curricula",
                     "get_curriculum_detail",
-                    "search_market_products");
+                    "search_market_products",
+                    "get_health_measurements",
+                    "get_health_documents",
+                    "get_analysis_history",
+                    "get_routine_progress",
+                    "get_activity_records",
+                    "get_nutrition_summary",
+                    "get_exercise_summary",
+                    "get_hydration_summary",
+                    "get_chat_history",
+                    "get_credit_history",
+                    "get_notification_settings");
     private static final Map<String, Set<String>> ALLOWED_ARGUMENTS =
-            Map.of(
-                    "get_health_summary", Set.of(),
-                    "get_latest_analysis", Set.of(),
-                    "get_routine_items",
+            Map.ofEntries(
+                    Map.entry("get_health_summary", Set.of()),
+                    Map.entry("get_latest_analysis", Set.of()),
+                    Map.entry(
+                            "get_routine_items",
                             Set.of(
                                     "dateFrom",
                                     "dateTo",
@@ -39,11 +51,27 @@ public class AiReadToolService {
                                     "sectionType",
                                     "sectionKeyword",
                                     "status",
-                                    "keyword"),
-                    "get_recent_records", Set.of("days"),
-                    "get_active_curricula", Set.of(),
-                    "get_curriculum_detail", Set.of("curriculumId"),
-                    "search_market_products", Set.of("keyword", "keywords"));
+                                    "keyword",
+                                    "intensity")),
+                    Map.entry("get_recent_records", Set.of("days")),
+                    Map.entry("get_active_curricula", Set.of()),
+                    Map.entry("get_curriculum_detail", Set.of("curriculumId")),
+                    Map.entry("search_market_products", Set.of("keyword", "keywords")),
+                    Map.entry(
+                            "get_health_measurements",
+                            Set.of("metricCode", "category", "dateFrom", "dateTo")),
+                    Map.entry("get_health_documents", Set.of("documentType", "status")),
+                    Map.entry("get_analysis_history", Set.of("status")),
+                    Map.entry("get_routine_progress", Set.of("routineId", "dateFrom", "dateTo")),
+                    Map.entry(
+                            "get_activity_records",
+                            Set.of("dateFrom", "dateTo", "recordType", "minPain")),
+                    Map.entry("get_nutrition_summary", Set.of("days")),
+                    Map.entry("get_exercise_summary", Set.of("days")),
+                    Map.entry("get_hydration_summary", Set.of("days")),
+                    Map.entry("get_chat_history", Set.of("days", "keyword")),
+                    Map.entry("get_credit_history", Set.of("days")),
+                    Map.entry("get_notification_settings", Set.of()));
 
     private final JdbcTemplate db;
 
@@ -54,8 +82,8 @@ public class AiReadToolService {
     @Transactional(readOnly = true)
     public List<LookupResult> execute(Long userId, List<LookupRequest> requests) {
         if (requests == null || requests.isEmpty()) return List.of();
-        if (requests.size() > 3) {
-            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "한 질문에서 조회는 최대 3개까지 가능합니다.");
+        if (requests.size() > 5) {
+            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "한 질문에서 조회는 최대 5개까지 가능합니다.");
         }
 
         List<LookupResult> results = new ArrayList<>();
@@ -147,6 +175,17 @@ public class AiReadToolService {
                             userId);
             case "get_curriculum_detail" -> curriculumDetail(userId, arguments);
             case "search_market_products" -> marketProducts(arguments);
+            case "get_health_measurements" -> healthMeasurements(userId, arguments);
+            case "get_health_documents" -> healthDocuments(userId, arguments);
+            case "get_analysis_history" -> analysisHistory(userId, arguments);
+            case "get_routine_progress" -> routineProgress(userId, arguments);
+            case "get_activity_records" -> activityRecords(userId, arguments);
+            case "get_nutrition_summary" -> typedRecords(userId, arguments, "MEAL");
+            case "get_exercise_summary" -> typedRecords(userId, arguments, "EXERCISE");
+            case "get_hydration_summary" -> hydrationRecords(userId, arguments);
+            case "get_chat_history" -> chatHistory(userId, arguments);
+            case "get_credit_history" -> creditHistory(userId, arguments);
+            case "get_notification_settings" -> notificationSettings(userId);
             default -> throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "지원하지 않는 조회입니다.");
         };
     }
@@ -231,6 +270,7 @@ public class AiReadToolService {
                        rest_seconds restSeconds,
                        memo,
                        sequence,
+                       intensity,
                        item_status itemStatus
                 from ai_routine_item_view
                 where user_id=?
@@ -244,6 +284,7 @@ public class AiReadToolService {
         addExactFilter(sql, parameters, arguments, "itemType", "item_type");
         addExactFilter(sql, parameters, arguments, "sectionType", "section_type");
         addExactFilter(sql, parameters, arguments, "status", "item_status");
+        addExactFilter(sql, parameters, arguments, "intensity", "intensity");
         addLikeFilter(sql, parameters, arguments, "sectionKeyword", "section_title");
         if (arguments.containsKey("keyword")) {
             String keyword = requiredFilterValue(arguments.get("keyword"), "keyword");
@@ -333,6 +374,152 @@ public class AiReadToolService {
                         from);
 
         return Map.of("activities", activities, "healthMetrics", healthMetrics);
+    }
+
+    private List<Map<String, Object>> healthMeasurements(
+            Long userId, Map<String, Object> arguments) {
+        LocalDate from =
+                date(arguments, "dateFrom", LocalDate.now(ZoneId.of("Asia/Seoul")).minusDays(90));
+        LocalDate to = date(arguments, "dateTo", LocalDate.now(ZoneId.of("Asia/Seoul")));
+        if (to.isBefore(from) || to.isAfter(from.plusDays(365)))
+            throw new ApiException(HttpStatus.BAD_REQUEST, "건강 측정 조회 범위는 최대 1년입니다.");
+        StringBuilder sql =
+                new StringBuilder(
+                        "select health_measurement_id measurementId,document_id documentId,category,metric_code metricCode,label,body_part bodyPart,body_side bodySide,numeric_value numericValue,text_value textValue,unit,reference_min referenceMin,reference_max referenceMax,measured_at measuredAt,confidence from ai_health_measurement_view where user_id=? and measured_at between ? and ?");
+        List<Object> values = new ArrayList<>(List.of(userId, from, to));
+        addExactFilter(sql, values, arguments, "metricCode", "metric_code");
+        addExactFilter(sql, values, arguments, "category", "category");
+        sql.append(" order by measured_at,health_measurement_id limit 300");
+        return db.queryForList(sql.toString(), values.toArray());
+    }
+
+    private List<Map<String, Object>> healthDocuments(Long userId, Map<String, Object> arguments) {
+        StringBuilder sql =
+                new StringBuilder(
+                        "select document_id documentId,document_type documentType,measured_at measuredAt,processing_status processingStatus,extracted_at extractedAt,created_at createdAt from ai_health_document_view where user_id=?");
+        List<Object> values = new ArrayList<>(List.of(userId));
+        addExactFilter(sql, values, arguments, "documentType", "document_type");
+        addExactFilter(sql, values, arguments, "status", "processing_status");
+        sql.append(" order by created_at desc limit 100");
+        return db.queryForList(sql.toString(), values.toArray());
+    }
+
+    private List<Map<String, Object>> analysisHistory(Long userId, Map<String, Object> arguments) {
+        StringBuilder sql =
+                new StringBuilder(
+                        "select analysis_id analysisId,analysis_type analysisType,summary,status,progress,completed_at completedAt,created_at createdAt from ai_analysis_history_view where user_id=?");
+        List<Object> values = new ArrayList<>(List.of(userId));
+        addExactFilter(sql, values, arguments, "status", "status");
+        sql.append(" order by created_at desc limit 100");
+        return db.queryForList(sql.toString(), values.toArray());
+    }
+
+    private List<Map<String, Object>> routineProgress(Long userId, Map<String, Object> arguments) {
+        LocalDate from =
+                date(
+                        arguments,
+                        "dateFrom",
+                        LocalDate.now(ZoneId.of("Asia/Seoul")).with(java.time.DayOfWeek.MONDAY));
+        LocalDate to = date(arguments, "dateTo", from.plusDays(6));
+        if (to.isBefore(from) || to.isAfter(from.plusDays(90)))
+            throw new ApiException(HttpStatus.BAD_REQUEST, "루틴 달성률 조회 범위는 최대 91일입니다.");
+        StringBuilder sql =
+                new StringBuilder(
+                        "select routine_id routineId,routine_title routineTitle,scheduled_date scheduledDate,item_status itemStatus,count(*) itemCount,sum(case when item_status='COMPLETED' then 1 else 0 end) completedCount,sum(case when item_status='SKIPPED' then 1 else 0 end) skippedCount from ai_routine_item_view where user_id=? and scheduled_date between ? and ?");
+        List<Object> values = new ArrayList<>(List.of(userId, from, to));
+        if (arguments.containsKey("routineId")) {
+            sql.append(" and routine_id=?");
+            values.add(positiveLong(arguments, "routineId"));
+        }
+        sql.append(
+                " group by routine_id,routine_title,scheduled_date,item_status order by scheduled_date,routine_id limit 300");
+        return db.queryForList(sql.toString(), values.toArray());
+    }
+
+    private List<Map<String, Object>> activityRecords(Long userId, Map<String, Object> arguments) {
+        LocalDate from =
+                date(arguments, "dateFrom", LocalDate.now(ZoneId.of("Asia/Seoul")).minusDays(28));
+        LocalDate to = date(arguments, "dateTo", LocalDate.now(ZoneId.of("Asia/Seoul")));
+        if (to.isBefore(from) || to.isAfter(from.plusDays(90)))
+            throw new ApiException(HttpStatus.BAD_REQUEST, "수행 기록 조회 범위는 최대 91일입니다.");
+        StringBuilder sql =
+                new StringBuilder(
+                        "select activity_record_id activityRecordId,routine_item_id routineItemId,record_type recordType,actual_value actualValue,status,details,energy_level energyLevel,pain_level painLevel,condition_memo conditionMemo,performed_at performedAt from ai_activity_record_view where user_id=? and performed_at>=? and performed_at<?");
+        List<Object> values =
+                new ArrayList<>(
+                        List.of(
+                                userId,
+                                Timestamp.valueOf(from.atStartOfDay()),
+                                Timestamp.valueOf(to.plusDays(1).atStartOfDay())));
+        addExactFilter(sql, values, arguments, "recordType", "record_type");
+        if (arguments.containsKey("minPain")) {
+            sql.append(" and pain_level>=?");
+            values.add(integer(arguments, "minPain", 0));
+        }
+        sql.append(" order by performed_at desc limit 300");
+        return db.queryForList(sql.toString(), values.toArray());
+    }
+
+    private List<Map<String, Object>> typedRecords(
+            Long userId, Map<String, Object> arguments, String type) {
+        int days = integer(arguments, "days", 7);
+        if (days < 1 || days > 90)
+            throw new ApiException(HttpStatus.BAD_REQUEST, "기록 조회 기간은 1~90일입니다.");
+        return db.queryForList(
+                "select activity_record_id activityRecordId,routine_item_id routineItemId,record_type recordType,actual_value actualValue,details,energy_level energyLevel,pain_level painLevel,condition_memo conditionMemo,performed_at performedAt from ai_activity_record_view where user_id=? and record_type=? and performed_at>=? order by performed_at desc limit 300",
+                userId,
+                type,
+                Timestamp.from(Instant.now().minus(days, java.time.temporal.ChronoUnit.DAYS)));
+    }
+
+    private List<Map<String, Object>> hydrationRecords(Long userId, Map<String, Object> arguments) {
+        int days = integer(arguments, "days", 7);
+        if (days < 1 || days > 90)
+            throw new ApiException(HttpStatus.BAD_REQUEST, "물 섭취 기록 조회 기간은 1~90일입니다.");
+        return db.queryForList(
+                "select activity_record_id activityRecordId,details,performed_at performedAt from ai_activity_record_view where user_id=? and record_type='OTHER' and lower(coalesce(details,'')) like ? and performed_at>=? order by performed_at desc limit 300",
+                userId,
+                "%waterml%",
+                Timestamp.from(Instant.now().minus(days, java.time.temporal.ChronoUnit.DAYS)));
+    }
+
+    private List<Map<String, Object>> chatHistory(Long userId, Map<String, Object> arguments) {
+        int days = integer(arguments, "days", 7);
+        if (days < 1 || days > 365)
+            throw new ApiException(HttpStatus.BAD_REQUEST, "대화 조회 기간은 1~365일입니다.");
+        StringBuilder sql =
+                new StringBuilder(
+                        "select chat_conversation_id conversationId,conversation_title conversationTitle,chat_message_id messageId,sender_role senderRole,content,response_type responseType,created_at createdAt from ai_chat_history_view where user_id=? and created_at>=?");
+        List<Object> values =
+                new ArrayList<>(
+                        List.of(
+                                userId,
+                                Timestamp.from(
+                                        Instant.now()
+                                                .minus(days, java.time.temporal.ChronoUnit.DAYS))));
+        if (arguments.containsKey("keyword")) {
+            String keyword = requiredFilterValue(arguments.get("keyword"), "keyword");
+            sql.append(" and lower(content) like ?");
+            values.add("%" + keyword.toLowerCase(Locale.ROOT) + "%");
+        }
+        sql.append(" order by chat_message_id desc limit 100");
+        return db.queryForList(sql.toString(), values.toArray());
+    }
+
+    private List<Map<String, Object>> creditHistory(Long userId, Map<String, Object> arguments) {
+        int days = integer(arguments, "days", 90);
+        if (days < 1 || days > 365)
+            throw new ApiException(HttpStatus.BAD_REQUEST, "크레딧 조회 기간은 1~365일입니다.");
+        return db.queryForList(
+                "select credit_transaction_id creditTransactionId,amount,balance_after balanceAfter,reason,created_at createdAt from ai_credit_history_view where user_id=? and created_at>=? order by created_at desc limit 100",
+                userId,
+                Timestamp.from(Instant.now().minus(days, java.time.temporal.ChronoUnit.DAYS)));
+    }
+
+    private List<Map<String, Object>> notificationSettings(Long userId) {
+        return db.queryForList(
+                "select routine_reminder_enabled routineReminderEnabled,routine_reminder_time routineReminderTime,marketing_enabled marketingEnabled,updated_at updatedAt from ai_notification_setting_view where user_id=?",
+                userId);
     }
 
     private List<Map<String, Object>> marketProducts(Map<String, Object> arguments) {

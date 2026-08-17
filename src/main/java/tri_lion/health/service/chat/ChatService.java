@@ -64,13 +64,14 @@ public class ChatService {
         String storedHistory = history.aiHistory(userId, conversationId, MAX_HISTORY_MESSAGES);
         String safeHistory =
                 "[]".equals(storedHistory) ? validateHistory(historyJson) : storedHistory;
-        history.saveUserMessage(userId, conversationId, question, image);
+        Long userMessageId = history.saveUserMessage(userId, conversationId, question, image);
 
         QueryPlan plan = gemini.plan(question, safeHistory, hasImage);
         validatePlan(plan);
 
         List<LookupResult> results = readTools.execute(userId, plan.lookups());
         AiDecision decision = gemini.decide(question, safeHistory, results, image);
+        decision = attachChatImageId(decision, userMessageId, hasImage);
         validateDecision(decision);
 
         ChatResponse response;
@@ -114,6 +115,29 @@ public class ChatService {
 
     public ChatImage image(Long messageId) {
         return history.image(auth.sensitive().getId(), messageId);
+    }
+
+    private AiDecision attachChatImageId(AiDecision decision, Long messageId, boolean hasImage) {
+        if (!hasImage || decision.operations() == null) return decision;
+        List<AiOperation> operations = new ArrayList<>();
+        boolean changed = false;
+        for (AiOperation operation : decision.operations()) {
+            if ("chatbotExpansion.registerChatImageAndAnalyze".equals(operation.methodName())) {
+                Map<String, Object> arguments = new LinkedHashMap<>(operation.arguments());
+                arguments.put("chatMessageId", messageId);
+                operations.add(new AiOperation(operation.methodName(), arguments));
+                changed = true;
+            } else {
+                operations.add(operation);
+            }
+        }
+        return changed
+                ? new AiDecision(
+                        decision.resultType(),
+                        decision.answer(),
+                        operations,
+                        decision.confirmationMessage())
+                : decision;
     }
 
     private void validatePlan(QueryPlan plan) {

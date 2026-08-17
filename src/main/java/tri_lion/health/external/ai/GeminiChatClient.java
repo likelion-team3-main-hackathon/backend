@@ -90,6 +90,28 @@ public class GeminiChatClient {
                 - keywords에는 사용자가 직접 말했거나 현재 질문에서 확실히 알 수 있는 식재료명만 최대 10개 입력하세요.
                 - 상품 ID를 추측하지 말고 반드시 조회 결과의 marketItemId만 사용하세요.
 
+                8. get_health_measurements {metricCode, category, dateFrom, dateTo}
+                - 인바디·혈액검사 등 추출된 안전한 측정값의 추세를 조회합니다.
+                - 골격근량은 metricCode=SKELETAL_MUSCLE_MASS_KG, 체지방률은 BODY_FAT_PERCENT를 사용하세요.
+
+                9. get_health_documents {documentType, status}
+                - 업로드한 처방전·진료기록·인바디 문서의 유형과 처리 상태를 조회합니다. 파일 원본이나 경로는 반환하지 않습니다.
+
+                10. get_analysis_history {status}
+                - 이전 건강 분석의 시간순 요약을 조회합니다.
+
+                11. get_routine_progress {routineId, dateFrom, dateTo}
+                - 예정·완료·건너뜀 항목 수를 바탕으로 루틴 달성률을 계산할 때 사용하세요.
+
+                12. get_activity_records {dateFrom, dateTo, recordType, minPain}
+                - 통증이 있던 날, 잘못 기록한 식사, 수행 기록 수정·삭제 대상을 찾을 때 사용하세요.
+
+                13. get_nutrition_summary {days}, get_exercise_summary {days}, get_hydration_summary {days}
+                - 최근 식사 또는 운동 기록의 details와 시간 정보를 함께 조회합니다. 평균 단백질·칼로리·총 운동시간 계산에 사용하세요.
+                - get_hydration_summary는 details.waterMl로 기록한 물 섭취량과 부족한 날짜를 계산할 때 사용하세요.
+
+                14. get_chat_history {days, keyword}, get_credit_history {days}, get_notification_settings {}
+                - 지난 대화, 크레딧 내역, 알림 설정을 묻는 질문에 사용하세요.
                 userId와 SQL은 절대 만들지 마세요.
                 사용자가 다른 사람·다른 회원 번호의 정보를 요구하면 개인 조회 도구를 선택하지 마세요.
                 조회 도구는 최대 3개만 선택하세요.
@@ -194,6 +216,7 @@ public class GeminiChatClient {
                 }
                 체중 기록의 details는 반드시 {"weightKg": 70.5} 형식입니다.
                 식사 기록의 details에는 foods와 calories를 넣으세요.
+                물 섭취 기록은 type="OTHER", details={"waterMl": 숫자}로 저장하세요.
 
                 2. 기존 루틴 항목 변경
                 methodName: routineService.patchRoutineItem
@@ -310,6 +333,49 @@ public class GeminiChatClient {
                   ]
                 }
 
+                8. 건강 프로필 변경
+                methodName: chatbotExpansion.patchWellnessProfile
+                - 목표 몸무게·건강 목표·알레르기·부상·운동 가능 요일·식단 선호·기피 음식을 변경할 때 사용합니다.
+                - get_health_summary 결과를 확인한 후 바꿀 값만 전달합니다. 배열 값은 새 목록 전체로 교체됩니다.
+                arguments: {"targetWeightKg": 숫자|null, "goals": [문자열], "allergies": [문자열], "injuries": [{"bodyPart":"KNEE","description":"..."}], "availableExerciseDays": ["TUESDAY"], "dietaryPreferences": [문자열], "dislikedFoods": [문자열], "availableExerciseMinutes": 숫자|null}
+
+                9. 여러 루틴 항목 일괄 변경·일정 변경·삭제
+                methodName: chatbotExpansion.batchPatchRoutineItems
+                - 아침 식단 전체 변경처럼 제목·내용·목표값을 여러 항목에 한 번에 바꿀 때 사용합니다.
+                arguments: {"routineId": 숫자, "items": [{"routineItemId": 숫자, "title": "...", "content": "...", "targetValue": 숫자|null, "targetUnit":"MINUTES|null", "sets": 숫자|null, "restSeconds": 숫자|null, "memo":"...", "intensity":"LOW|MODERATE|HIGH|null"}]}
+                methodName: chatbotExpansion.rescheduleRoutineItems
+                - 못 한 운동을 다른 날짜·시간으로 옮길 때 사용합니다. SKIPPED 항목도 내일로 옮기면 다시 PENDING 상태가 됩니다.
+                arguments: {"routineId": 숫자, "itemIds": [숫자], "scheduledDate":"YYYY-MM-DD", "scheduledTime":"HH:mm"}
+                methodName: chatbotExpansion.shiftRoutineItemTimes
+                - 선택한 날짜·요일의 여러 항목을 각각 현재 시간 기준으로 같은 분만큼 앞이나 뒤로 이동할 때 사용합니다.
+                - 예: 매주 월요일 운동을 20분 늦추려면 월요일 항목들을 조회해 minuteOffset=20으로 전달합니다.
+                arguments: {"routineId": 숫자, "itemIds": [숫자], "minuteOffset": -720~720}
+                methodName: chatbotExpansion.deleteRoutineItems
+                - intensity=HIGH로 명시된 고강도 또는 사용자가 명시한 불필요한 항목만 삭제합니다. 강도를 알 수 없으면 추가 질문하세요.
+                arguments: {"routineId": 숫자, "itemIds": [숫자]}
+
+                methodName: chatbotExpansion.pauseRoutine, chatbotExpansion.resumeRoutine, chatbotExpansion.keepOnlyRoutineActive
+                - 루틴을 기간 동안 중지하거나 다시 시작하거나, 여러 활성 루틴 중 하나만 남길 때 사용합니다.
+                - "일주일 중지"는 오늘부터 7일 후의 pausedUntil을 넣습니다.
+                arguments: {"routineId": 숫자, "pausedUntil":"YYYY-MM-DD"}
+                - keepOnlyRoutineActive는 {"routineId": 숫자}만 사용합니다.
+
+                10. 수행 기록 수정·삭제
+                methodName: chatbotExpansion.updateActivityRecord
+                arguments: {"activityRecordId": 숫자, "details": {}, "energyLevel": 숫자|null, "painLevel": 숫자|null, "memo":"...", "performedAt":"ISO-8601"}
+                methodName: chatbotExpansion.deleteActivityRecord
+                arguments: {"activityRecordId": 숫자}
+                methodName: chatbotExpansion.deleteHealthRecord
+                - 체중 등 health_records에 저장된 건강 수치를 삭제할 때 사용합니다. get_recent_records의 healthRecordId를 사용합니다.
+                arguments: {"healthRecordId": 숫자}
+
+                11. 알림·사진 문서 분석
+                methodName: chatbotExpansion.updateNotificationSettings
+                arguments: {"routineReminderEnabled": true|false|null, "routineReminderTime":"20:00", "marketingEnabled": true|false|null}
+                methodName: chatbotExpansion.registerChatImageAndAnalyze
+                - 사용자가 현재 첨부한 사진을 새 건강 문서로 등록하고 분석해 달라고 명확히 요청한 경우만 사용하세요.
+                - chatMessageId는 만들지 말고 documentType과 measuredAt만 넣으세요. Spring이 현재 사진의 메시지 ID를 강제로 추가합니다.
+                arguments: {"documentType":"INBODY|MEDICAL_RECORD|PRESCRIPTION|MCC_RESULT|OTHER", "measuredAt":"YYYY-MM-DD 또는 생략"}
                 운동 단위:
                 - SECONDS
                 - MINUTES

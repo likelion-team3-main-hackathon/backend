@@ -112,7 +112,7 @@ public class ChatHistoryService {
     }
 
     @Transactional
-    public void saveUserMessage(
+    public Long saveUserMessage(
             Long userId, Long conversationId, String content, MultipartFile image) {
         ChatConversation conversation = owned(conversationId, userId);
         boolean hasImage = image != null && !image.isEmpty();
@@ -127,17 +127,19 @@ public class ChatHistoryService {
                 throw new ApiException(HttpStatus.BAD_REQUEST, "대화 이미지를 저장하지 못했습니다.");
             }
         }
-        messages.save(
-                new ChatMessage(
-                        conversationId,
-                        ChatMessage.SenderRole.USER,
-                        content,
-                        null,
-                        null,
-                        hasImage,
-                        imageObjectKey,
-                        imageContentType));
+        ChatMessage saved =
+                messages.save(
+                        new ChatMessage(
+                                conversationId,
+                                ChatMessage.SenderRole.USER,
+                                content,
+                                null,
+                                null,
+                                hasImage,
+                                imageObjectKey,
+                                imageContentType));
         conversation.addMessage(content);
+        return saved.getId();
     }
 
     @Transactional
