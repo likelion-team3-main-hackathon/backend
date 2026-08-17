@@ -73,12 +73,33 @@ public class MealAnalysisService {
             Map<String, Object> details = new LinkedHashMap<>(totals);
             details.put("foods", foods); details.put("menu", foods.stream().map(f -> f.get("name")).toList());
             details.put("completed", true); details.put("source", "MEAL_PHOTO_ANALYSIS");
-            ActivityRecord record = recordService.create(new RecordRequest(analysis.getRoutineItemId(), ActivityType.MEAL,
-                    analysis.getRecordedAt().atOffset(ZoneOffset.UTC), details, analysis.getImageKey(), null));
+            ActivityRecord record = replaceCompletedMealRecord(analysis, details).orElseGet(() ->
+                    recordService.create(new RecordRequest(analysis.getRoutineItemId(), ActivityType.MEAL,
+                            analysis.getRecordedAt().atOffset(ZoneOffset.UTC), details, analysis.getImageKey(), null)));
             analysis.confirm(record.getId());
             return analysis;
         } catch (RuntimeException exception) { throw exception; }
         catch (Exception exception) { throw new IllegalArgumentException("식단 기록을 확정하지 못했습니다.", exception); }
+    }
+
+    private Optional<ActivityRecord> replaceCompletedMealRecord(
+            MealAnalysis analysis, Map<String, Object> details) {
+        if (analysis.getRoutineItemId() == null) return Optional.empty();
+        return records.findFirstByUserIdAndRoutineItemIdAndStatus(
+                        auth.active().getId(), analysis.getRoutineItemId(), "COMPLETED")
+                .map(record -> {
+                    try {
+                        record.reviseMeal(
+                                analysis.getRecordedAt(),
+                                json.writeValueAsString(details),
+                                analysis.getImageKey());
+                        return record;
+                    } catch (RuntimeException exception) {
+                        throw exception;
+                    } catch (Exception exception) {
+                        throw new IllegalArgumentException("식단 기록을 수정하지 못했습니다.", exception);
+                    }
+                });
     }
 
     public Map<String, Object> daily(LocalDate date) {
