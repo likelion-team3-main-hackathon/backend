@@ -10,6 +10,7 @@ import tri_lion.health.common.response.ApiResponse;
 import tri_lion.health.domain.record.*;
 import tri_lion.health.dto.request.record.RecordBatchRequest;
 import tri_lion.health.dto.request.record.RecordRequest;
+import tri_lion.health.dto.request.record.WaterRecordRequest;
 import tri_lion.health.service.record.RecordService;
 
 @RestController
@@ -58,6 +59,19 @@ public class RecordController {
                                                 .toList(),
                                         "count",
                                         saved.size())));
+    }
+
+    @PutMapping("/routine-records/water")
+    ApiResponse<Object> upsertWater(@Valid @RequestBody WaterRecordRequest request) {
+        ActivityRecord record = service.upsertWater(request);
+        return ApiResponse.success(
+                200,
+                "물 섭취 기록 저장 성공",
+                java.util.Map.of(
+                        "recordId", record.getId(),
+                        "glasses", request.glasses(),
+                        "milliliters", request.glasses() * 250,
+                        "recordedAt", record.getPerformedAt()));
     }
 
     @PostMapping(value = "/routine-records/images", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

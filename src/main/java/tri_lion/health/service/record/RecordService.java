@@ -17,6 +17,7 @@ import tri_lion.health.domain.routine.ExerciseItem;
 import tri_lion.health.domain.routine.Routine;
 import tri_lion.health.dto.request.record.RecordBatchRequest;
 import tri_lion.health.dto.request.record.RecordRequest;
+import tri_lion.health.dto.request.record.WaterRecordRequest;
 import tri_lion.health.exception.ApiException;
 import tri_lion.health.exception.RateLimitExceededException;
 import tri_lion.health.external.storage.ObjectStorage;
@@ -84,6 +85,58 @@ public class RecordService {
                             "activityType", trigger.getType(),
                             "batchSize", saved.size()));
         return saved;
+    }
+
+    @Transactional
+    public ActivityRecord upsertWater(WaterRecordRequest request) {
+        Long userId = auth.active().getId();
+        ZoneId seoul = ZoneId.of("Asia/Seoul");
+        LocalDate date = request.recordedAt().atZoneSameInstant(seoul).toLocalDate();
+        Instant from = date.atStartOfDay(seoul).toInstant();
+        Instant to = date.plusDays(1).atStartOfDay(seoul).toInstant();
+        String details;
+        try {
+            details =
+                    json.writeValueAsString(
+                            Map.of(
+                                    "category", "WATER",
+                                    "glasses", request.glasses(),
+                                    "milliliters", request.glasses() * 250));
+        } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
+            throw new IllegalArgumentException(exception);
+        }
+
+        Optional<ActivityRecord> existing =
+                records.findByUserIdAndTypeAndPerformedAtBetweenOrderByPerformedAtDescCreatedAtDesc(
+                                userId, ActivityType.OTHER, from, to)
+                        .stream()
+                        .filter(this::isWaterRecord)
+                        .findFirst();
+        if (existing.isPresent()) {
+            ActivityRecord record = existing.get();
+            record.reviseWater(request.recordedAt().toInstant(), details);
+            return record;
+        }
+        return records.save(
+                new ActivityRecord(
+                        userId,
+                        null,
+                        ActivityType.OTHER,
+                        request.recordedAt().toInstant(),
+                        details,
+                        null,
+                        "COMPLETED",
+                        null,
+                        null,
+                        null));
+    }
+
+    private boolean isWaterRecord(ActivityRecord record) {
+        try {
+            return "WATER".equals(json.readTree(record.getDetails()).path("category").asText());
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     public String uploadImage(MultipartFile image) {
