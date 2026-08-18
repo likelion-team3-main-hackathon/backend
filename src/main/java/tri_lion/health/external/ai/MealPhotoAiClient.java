@@ -41,57 +41,71 @@ public class MealPhotoAiClient {
             throw new IllegalStateException("식단 사진 분석에는 GOOGLE_API_KEY가 필요합니다.");
         }
         try {
-            Map<String, Object> schema = json.readValue(
-                    """
+            Map<String, Object> schema =
+                    json.readValue(
+                            """
                     {"type":"object","properties":{"foods":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"servingGrams":{"type":"number"},"calories":{"type":"number"},"carbohydrateGrams":{"type":"number"},"proteinGrams":{"type":"number"},"fatGrams":{"type":"number"}},"required":["name","servingGrams","calories","carbohydrateGrams","proteinGrams","fatGrams"]}},"confidence":{"type":"number"}},"required":["foods","confidence"]}
                     """,
-                    Map.class);
-            Map<String, Object> body = Map.of(
-                    "contents",
-                    List.of(Map.of(
-                            "parts",
+                            Map.class);
+            Map<String, Object> body =
+                    Map.of(
+                            "contents",
                             List.of(
-                                    Map.of("text", prompt.content()),
                                     Map.of(
-                                            "inlineData",
-                                            Map.of(
-                                                    "mimeType", contentType,
-                                                    "data", Base64.getEncoder().encodeToString(image)))))),
-                    "generationConfig",
-                    Map.of("responseMimeType", "application/json", "responseJsonSchema", schema));
-            JsonNode response = client.post()
-                    .uri(uri -> uri.path("/models/{model}:generateContent")
-                            .queryParam("key", apiKey)
-                            .build(model))
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(body)
-                    .retrieve()
-                    .body(JsonNode.class);
-            String text = response.path("candidates")
-                    .path(0)
-                    .path("content")
-                    .path("parts")
-                    .path(0)
-                    .path("text")
-                    .asText();
+                                            "parts",
+                                            List.of(
+                                                    Map.of("text", prompt.content()),
+                                                    Map.of(
+                                                            "inlineData",
+                                                            Map.of(
+                                                                    "mimeType",
+                                                                    contentType,
+                                                                    "data",
+                                                                    Base64.getEncoder()
+                                                                            .encodeToString(
+                                                                                    image)))))),
+                            "generationConfig",
+                            Map.of(
+                                    "responseMimeType",
+                                    "application/json",
+                                    "responseJsonSchema",
+                                    schema));
+            JsonNode response =
+                    client.post()
+                            .uri(
+                                    uri ->
+                                            uri.path("/models/{model}:generateContent")
+                                                    .queryParam("key", apiKey)
+                                                    .build(model))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .body(body)
+                            .retrieve()
+                            .body(JsonNode.class);
+            String text =
+                    response.path("candidates")
+                            .path(0)
+                            .path("content")
+                            .path("parts")
+                            .path(0)
+                            .path("text")
+                            .asText();
             JsonNode result = json.readTree(text);
             List<Food> foods = new ArrayList<>();
             for (JsonNode food : result.path("foods")) {
-                foods.add(new Food(
-                        food.path("name").asText(),
-                        positive(food, "servingGrams"),
-                        positive(food, "calories"),
-                        positive(food, "carbohydrateGrams"),
-                        positive(food, "proteinGrams"),
-                        positive(food, "fatGrams")));
+                foods.add(
+                        new Food(
+                                food.path("name").asText(),
+                                positive(food, "servingGrams"),
+                                positive(food, "calories"),
+                                positive(food, "carbohydrateGrams"),
+                                positive(food, "proteinGrams"),
+                                positive(food, "fatGrams")));
             }
             if (foods.isEmpty()) {
                 throw new IllegalArgumentException("사진에서 음식을 찾지 못했습니다.");
             }
             return new Result(
-                    foods,
-                    Math.max(0, Math.min(1, result.path("confidence").asDouble())),
-                    model);
+                    foods, Math.max(0, Math.min(1, result.path("confidence").asDouble())), model);
         } catch (RuntimeException exception) {
             throw exception;
         } catch (Exception exception) {

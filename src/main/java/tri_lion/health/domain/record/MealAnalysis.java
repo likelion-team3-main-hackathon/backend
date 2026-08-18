@@ -56,8 +56,15 @@ public class MealAnalysis {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
-    public MealAnalysis(Long userId, Long routineItemId, String imageKey, String foods, String totals,
-            BigDecimal confidence, String modelVersion, Instant recordedAt) {
+    public MealAnalysis(
+            Long userId,
+            Long routineItemId,
+            String imageKey,
+            String foods,
+            String totals,
+            BigDecimal confidence,
+            String modelVersion,
+            Instant recordedAt) {
         this.userId = userId;
         this.routineItemId = routineItemId;
         this.imageKey = imageKey;
@@ -85,5 +92,9 @@ public class MealAnalysis {
         updatedAt = Instant.now();
     }
 
-    public enum Status { COMPLETED, CONFIRMED, FAILED }
+    public enum Status {
+        COMPLETED,
+        CONFIRMED,
+        FAILED
+    }
 }

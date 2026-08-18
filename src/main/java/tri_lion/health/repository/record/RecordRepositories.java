@@ -17,8 +17,9 @@ public final class RecordRepositories {
         List<ActivityRecord> findByUserIdAndPerformedAtBetweenOrderByPerformedAtDescCreatedAtDesc(
                 Long u, Instant a, Instant b);
 
-        List<ActivityRecord> findByUserIdAndTypeAndPerformedAtBetweenOrderByPerformedAtDescCreatedAtDesc(
-                Long u, ActivityType type, Instant a, Instant b);
+        List<ActivityRecord>
+                findByUserIdAndTypeAndPerformedAtBetweenOrderByPerformedAtDescCreatedAtDesc(
+                        Long u, ActivityType type, Instant a, Instant b);
     }
 
     public interface Coachings extends JpaRepository<Coaching, Long> {

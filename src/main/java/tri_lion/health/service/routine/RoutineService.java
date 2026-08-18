@@ -78,7 +78,8 @@ public class RoutineService {
                                                 "루틴 생성에 필요한 온보딩 또는 건강 분석 정보가 부족합니다."));
         validateRecommendationSelection(req, a);
         Set<Long> allReplacedRoutineIds = new LinkedHashSet<>();
-        if (req.replacedMealRoutineIds() != null) allReplacedRoutineIds.addAll(req.replacedMealRoutineIds());
+        if (req.replacedMealRoutineIds() != null)
+            allReplacedRoutineIds.addAll(req.replacedMealRoutineIds());
         if (req.replacedExerciseRoutineIds() != null)
             allReplacedRoutineIds.addAll(req.replacedExerciseRoutineIds());
         for (Long targetRoutineId : allReplacedRoutineIds) {
@@ -147,15 +148,13 @@ public class RoutineService {
             Routine mealTarget =
                     replacedMealIds.isEmpty()
                             ? null
-                            : routines
-                                    .findById(replacedMealIds.get(0))
+                            : routines.findById(replacedMealIds.get(0))
                                     .filter(x -> x.getStatus() == Routine.Status.ACTIVE)
                                     .orElse(null);
             Routine exerciseTarget =
                     replacedExerciseIds.isEmpty()
                             ? null
-                            : routines
-                                    .findById(replacedExerciseIds.get(0))
+                            : routines.findById(replacedExerciseIds.get(0))
                                     .filter(x -> x.getStatus() == Routine.Status.ACTIVE)
                                     .orElse(null);
 
@@ -164,8 +163,7 @@ public class RoutineService {
             affectedRoutineIds.addAll(replacedExerciseIds);
             Map<Long, Routine> affectedRoutines = new LinkedHashMap<>();
             for (Long targetId : affectedRoutineIds) {
-                routines
-                        .findById(targetId)
+                routines.findById(targetId)
                         .filter(x -> x.getStatus() == Routine.Status.ACTIVE)
                         .ifPresent(
                                 target -> {
@@ -189,7 +187,9 @@ public class RoutineService {
                 Routine.Type routineType =
                         needsNewRoutineForMeal && needsNewRoutineForExercise
                                 ? Routine.Type.MIXED
-                                : needsNewRoutineForMeal ? Routine.Type.MEAL : Routine.Type.EXERCISE;
+                                : needsNewRoutineForMeal
+                                        ? Routine.Type.MEAL
+                                        : Routine.Type.EXERCISE;
                 String title = previous != null ? "재조정 " + plan.title() : plan.title();
                 r =
                         new Routine(

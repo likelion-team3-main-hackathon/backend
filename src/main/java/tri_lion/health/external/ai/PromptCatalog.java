@@ -30,8 +30,7 @@ public class PromptCatalog {
                     String routineGenerationVersion,
             @Value("${app.ai.prompts.record-coaching-version:coaching-v2}")
                     String recordCoachingVersion,
-            @Value("${app.ai.prompts.meal-photo-version:meal-photo-v1}")
-                    String mealPhotoVersion,
+            @Value("${app.ai.prompts.meal-photo-version:meal-photo-v1}") String mealPhotoVersion,
             @Value("${app.ai.prompts.pose-analysis-version:pose-analysis-v2}")
                     String poseAnalysisVersion) {
         documentExtraction = load(resources, "document-extraction", documentExtractionVersion);

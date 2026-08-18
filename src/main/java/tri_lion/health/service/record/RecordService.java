@@ -99,15 +99,19 @@ public class RecordService {
             details =
                     json.writeValueAsString(
                             Map.of(
-                                    "category", "WATER",
-                                    "glasses", request.glasses(),
-                                    "milliliters", request.glasses() * 250));
+                                    "category",
+                                    "WATER",
+                                    "glasses",
+                                    request.glasses(),
+                                    "milliliters",
+                                    request.glasses() * 250));
         } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
             throw new IllegalArgumentException(exception);
         }
 
         Optional<ActivityRecord> existing =
-                records.findByUserIdAndTypeAndPerformedAtBetweenOrderByPerformedAtDescCreatedAtDesc(
+                records
+                        .findByUserIdAndTypeAndPerformedAtBetweenOrderByPerformedAtDescCreatedAtDesc(
                                 userId, ActivityType.OTHER, from, to)
                         .stream()
                         .filter(this::isWaterRecord)
@@ -289,9 +293,11 @@ public class RecordService {
         Instant from = date.atStartOfDay(ZoneId.of("Asia/Seoul")).toInstant();
         Instant to = from.plus(1, java.time.temporal.ChronoUnit.DAYS);
         return type == null
-                ? records.findByUserIdAndPerformedAtBetweenOrderByPerformedAtDescCreatedAtDesc(uid, from, to)
-                : records.findByUserIdAndTypeAndPerformedAtBetweenOrderByPerformedAtDescCreatedAtDesc(
-                        uid, type, from, to);
+                ? records.findByUserIdAndPerformedAtBetweenOrderByPerformedAtDescCreatedAtDesc(
+                        uid, from, to)
+                : records
+                        .findByUserIdAndTypeAndPerformedAtBetweenOrderByPerformedAtDescCreatedAtDesc(
+                                uid, type, from, to);
     }
 
     public Coaching latest() {

@@ -46,6 +46,8 @@ class PromptCatalogTests {
                 "document-v3-iso-measured-date",
                 "health-v3-multi-document",
                 routineVersion,
-                "coaching-v2");
+                "coaching-v2",
+                "meal-photo-v1",
+                "pose-analysis-v2");
     }
 }

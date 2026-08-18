@@ -246,13 +246,20 @@ public class AnalysisLabService {
             int weekNumber = (wednesday.getDayOfMonth() - 1) / 7 + 1;
             weeklyVolume.add(
                     Map.of(
-                            "weekStart", weekStart,
-                            "weekEnd", weekStart.plusDays(6),
-                            "month", wednesday.getMonthValue(),
-                            "weekNumber", weekNumber,
-                            "label", wednesday.getMonthValue() + "월 " + weekNumber + "주",
-                            "completedSets", value[0],
-                    "durationMinutes", value[1]));
+                            "weekStart",
+                            weekStart,
+                            "weekEnd",
+                            weekStart.plusDays(6),
+                            "month",
+                            wednesday.getMonthValue(),
+                            "weekNumber",
+                            weekNumber,
+                            "label",
+                            wednesday.getMonthValue() + "월 " + weekNumber + "주",
+                            "completedSets",
+                            value[0],
+                            "durationMinutes",
+                            value[1]));
         }
         List<Map<String, Object>> dailyTrend = new ArrayList<>();
         for (LocalDate date = from; !date.isAfter(to); date = date.plusDays(1)) {
