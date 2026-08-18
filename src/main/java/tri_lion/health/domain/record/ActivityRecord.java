@@ -86,4 +86,12 @@ public class ActivityRecord {
         this.details = details;
         this.imageKey = imageKey;
     }
+
+    public void reviseWater(Instant performedAt, String details) {
+        if (type != ActivityType.OTHER || !"COMPLETED".equals(status)) {
+            throw new IllegalStateException("완료된 기타 활동 기록만 물 기록으로 수정할 수 있습니다.");
+        }
+        this.performedAt = performedAt;
+        this.details = details;
+    }
 }
