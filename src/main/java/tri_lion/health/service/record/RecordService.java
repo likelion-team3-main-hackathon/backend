@@ -231,6 +231,7 @@ public class RecordService {
         if (type == ActivityType.MEAL) {
             // 아침·점심·저녁은 각각 별도 routine item이므로 완료 1건당 한 번만 지급된다.
             users.findForUpdateById(userId).orElseThrow().addCredits(10);
+            log.info("CREDIT_REWARD userId={} type=MEAL amount=10 routineItemId={}", userId, item.getId());
             return;
         }
         if (type != ActivityType.EXERCISE && type != ActivityType.REHABILITATION) return;
@@ -241,11 +242,18 @@ public class RecordService {
                 items.findByRoutineIdAndScheduledDateAndDeletedAtIsNullOrderBySectionOrderAscSortOrderAsc(
                         item.getRoutineId(), date);
         List<ExerciseItem> exerciseItems =
-                dayItems.stream().filter(x -> !"MEAL".equals(x.getItemType())).toList();
+                dayItems.stream()
+                        .filter(x -> "EXERCISE".equals(x.getItemType()) || "REHABILITATION".equals(x.getItemType()))
+                        .toList();
         if (!exerciseItems.isEmpty()
                 && exerciseItems.stream().allMatch(x -> x.getStatus() == ExerciseItem.Status.COMPLETED)) {
             // 같은 날짜의 마지막 운동 항목이 완료될 때 하루 루틴 보상 1회 지급
             users.findForUpdateById(userId).orElseThrow().addCredits(20);
+            log.info(
+                    "CREDIT_REWARD userId={} type=EXERCISE amount=20 routineId={} date={}",
+                    userId,
+                    item.getRoutineId(),
+                    date);
         }
     }
 
