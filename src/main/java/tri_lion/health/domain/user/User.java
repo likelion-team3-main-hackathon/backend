@@ -58,8 +58,15 @@ public class User {
         this.nickname = "user-" + java.util.UUID.randomUUID().toString().substring(0, 8);
         this.role = Role.USER;
         this.status = Status.PENDING_TERMS;
+        this.creditBalance = 0;
         this.createdAt = Instant.now();
         this.updatedAt = this.createdAt;
+    }
+
+    public void addCredits(int amount) {
+        if (amount <= 0) throw new IllegalArgumentException("크레딧은 양수만 지급할 수 있습니다.");
+        creditBalance += amount;
+        updatedAt = Instant.now();
     }
 
     public void agreementsCompleted() {

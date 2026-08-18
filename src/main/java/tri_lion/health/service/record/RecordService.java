@@ -24,6 +24,7 @@ import tri_lion.health.external.storage.ObjectStorage;
 import tri_lion.health.repository.health.HealthRepositories;
 import tri_lion.health.repository.record.RecordRepositories;
 import tri_lion.health.repository.routine.RoutineRepositories;
+import tri_lion.health.repository.user.UserRepositories;
 import tri_lion.health.security.AuthenticatedUser;
 import tri_lion.health.service.health.AiRequestLimitService;
 
@@ -40,6 +41,7 @@ public class RecordService {
     private final ObjectStorage storage;
     private final JdbcTemplate db;
     private final AiRequestLimitService limits;
+    private final UserRepositories.Users users;
 
     public RecordService(
             RecordRepositories.Records r,
@@ -51,7 +53,8 @@ public class RecordService {
             ObjectMapper o,
             ObjectStorage storage,
             JdbcTemplate db,
-            AiRequestLimitService limits) {
+            AiRequestLimitService limits,
+            UserRepositories.Users users) {
         records = r;
         coachings = c;
         items = i;
@@ -62,6 +65,7 @@ public class RecordService {
         this.storage = storage;
         this.db = db;
         this.limits = limits;
+        this.users = users;
     }
 
     @Transactional
@@ -203,6 +207,7 @@ public class RecordService {
                 if (skipped) item.skip();
                 else item.complete();
             }
+            if (!skipped && item != null) awardRoutineCredits(uid, q.type(), item);
             if (!skipped && q.type() == ActivityType.WEIGHT) {
                 saveWeightMetric(uid, q);
             }
@@ -219,6 +224,28 @@ public class RecordService {
             throw e;
         } catch (Exception e) {
             throw new IllegalArgumentException(e);
+        }
+    }
+
+    private void awardRoutineCredits(Long userId, ActivityType type, ExerciseItem item) {
+        if (type == ActivityType.MEAL) {
+            // 아침·점심·저녁은 각각 별도 routine item이므로 완료 1건당 한 번만 지급된다.
+            users.findForUpdateById(userId).orElseThrow().addCredits(10);
+            return;
+        }
+        if (type != ActivityType.EXERCISE && type != ActivityType.REHABILITATION) return;
+
+        LocalDate date = item.getScheduledDate();
+        if (date == null) return;
+        List<ExerciseItem> dayItems =
+                items.findByRoutineIdAndScheduledDateAndDeletedAtIsNullOrderBySectionOrderAscSortOrderAsc(
+                        item.getRoutineId(), date);
+        List<ExerciseItem> exerciseItems =
+                dayItems.stream().filter(x -> !"MEAL".equals(x.getItemType())).toList();
+        if (!exerciseItems.isEmpty()
+                && exerciseItems.stream().allMatch(x -> x.getStatus() == ExerciseItem.Status.COMPLETED)) {
+            // 같은 날짜의 마지막 운동 항목이 완료될 때 하루 루틴 보상 1회 지급
+            users.findForUpdateById(userId).orElseThrow().addCredits(20);
         }
     }
 
