@@ -185,6 +185,7 @@ public class AnalysisLabService {
         }
         int completedSets = 0;
         int completedMinutes = 0;
+        Map<LocalDate, int[]> daily = new TreeMap<>();
         Map<LocalDate, int[]> weekly = new TreeMap<>();
         for (ActivityRecord record : completed) {
             JsonNode details = parse(record.getDetails());
@@ -211,6 +212,9 @@ public class AnalysisLabService {
             completedSets += Math.max(0, sets);
             completedMinutes += Math.max(0, minutes);
             LocalDate date = record.getPerformedAt().atZone(SEOUL).toLocalDate();
+            int[] dailyValue = daily.computeIfAbsent(date, key -> new int[2]);
+            dailyValue[0] += Math.max(0, sets);
+            dailyValue[1] += Math.max(0, minutes);
             LocalDate week = date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
             int[] weekValue = weekly.computeIfAbsent(week, key -> new int[2]);
             weekValue[0] += sets;
@@ -229,18 +233,36 @@ public class AnalysisLabService {
                 groups.entrySet().stream()
                         .map(entry -> muscleVolume(entry.getKey(), entry.getValue()))
                         .toList();
-        List<Map<String, Object>> weeklyVolume =
-                weekly.entrySet().stream()
-                        .map(
-                                entry ->
-                                        Map.<String, Object>of(
-                                                "weekStart",
-                                                entry.getKey(),
-                                                "completedSets",
-                                                entry.getValue()[0],
-                                                "durationMinutes",
-                                                entry.getValue()[1]))
-                        .toList();
+        LocalDate firstWeek = from.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        LocalDate lastWeek = to.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        LocalDate recentFirstWeek =
+                firstWeek.isAfter(lastWeek.minusWeeks(3)) ? firstWeek : lastWeek.minusWeeks(3);
+        List<Map<String, Object>> weeklyVolume = new ArrayList<>();
+        for (LocalDate weekStart = recentFirstWeek;
+                !weekStart.isAfter(lastWeek);
+                weekStart = weekStart.plusWeeks(1)) {
+            int[] value = weekly.getOrDefault(weekStart, new int[2]);
+            LocalDate wednesday = weekStart.plusDays(2);
+            int weekNumber = (wednesday.getDayOfMonth() - 1) / 7 + 1;
+            weeklyVolume.add(
+                    Map.of(
+                            "weekStart", weekStart,
+                            "weekEnd", weekStart.plusDays(6),
+                            "month", wednesday.getMonthValue(),
+                            "weekNumber", weekNumber,
+                            "label", wednesday.getMonthValue() + "월 " + weekNumber + "주",
+                            "completedSets", value[0],
+                            "durationMinutes", value[1]));
+        }
+        List<Map<String, Object>> dailyTrend = new ArrayList<>();
+        for (LocalDate date = from; !date.isAfter(to); date = date.plusDays(1)) {
+            int[] value = daily.getOrDefault(date, new int[2]);
+            dailyTrend.add(
+                    Map.of(
+                            "date", date,
+                            "completedSets", value[0],
+                            "durationMinutes", value[1]));
+        }
         Map<String, Object> result = new LinkedHashMap<>();
         result.put(
                 "status",
@@ -258,6 +280,7 @@ public class AnalysisLabService {
         result.put("recommendedSets", recommendedSets);
         result.put("durationMinutes", completedMinutes);
         result.put("muscleGroupVolumes", volumes);
+        result.put("dailyTrend", dailyTrend);
         result.put("weeklyVolume", weeklyVolume);
         result.put("summary", exerciseSummary(volumes, planned.isEmpty() && completed.isEmpty()));
         return result;
