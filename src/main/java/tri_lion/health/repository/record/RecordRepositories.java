@@ -11,10 +11,13 @@ public final class RecordRepositories {
     public interface Records extends JpaRepository<ActivityRecord, Long> {
         boolean existsByUserIdAndRoutineItemIdAndStatus(Long u, Long i, String s);
 
-        List<ActivityRecord> findByUserIdAndPerformedAtBetweenOrderByPerformedAtDesc(
+        Optional<ActivityRecord> findFirstByUserIdAndRoutineItemIdAndStatus(
+                Long u, Long i, String s);
+
+        List<ActivityRecord> findByUserIdAndPerformedAtBetweenOrderByPerformedAtDescCreatedAtDesc(
                 Long u, Instant a, Instant b);
 
-        List<ActivityRecord> findByUserIdAndTypeAndPerformedAtBetweenOrderByPerformedAtDesc(
+        List<ActivityRecord> findByUserIdAndTypeAndPerformedAtBetweenOrderByPerformedAtDescCreatedAtDesc(
                 Long u, ActivityType type, Instant a, Instant b);
     }
 

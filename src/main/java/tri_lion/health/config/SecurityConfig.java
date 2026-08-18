@@ -5,6 +5,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.*;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.*;
@@ -17,6 +18,16 @@ public class SecurityConfig {
         return http.csrf(x -> x.disable())
                 .cors(c -> {})
                 .sessionManagement(x -> x.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .exceptionHandling(
+                        x ->
+                                x.authenticationEntryPoint(
+                                                (request, response, exception) ->
+                                                        response.sendError(
+                                                                HttpStatus.UNAUTHORIZED.value()))
+                                        .accessDeniedHandler(
+                                                (request, response, exception) ->
+                                                        response.sendError(
+                                                                HttpStatus.FORBIDDEN.value())))
                 .authorizeHttpRequests(
                         x ->
                                 x.requestMatchers(

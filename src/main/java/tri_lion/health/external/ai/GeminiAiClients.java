@@ -46,7 +46,7 @@ public class GeminiAiClients {
     AiClients.OcrClient geminiOcrClient(
             GeminiGateway gateway,
             PromptCatalog prompts,
-            @Value("${app.ai.models.analysis:gemini-3.6-flash}") String model) {
+            @Value("${app.ai.models.analysis:gemini-3.5-flash-lite}") String model) {
         return new AiClients.OcrClient() {
             @Override
             public String extract(List<AiClients.DocumentInput> documents) {
@@ -73,7 +73,7 @@ public class GeminiAiClients {
     AiClients.LlmClient geminiLlmClient(
             GeminiGateway gateway,
             PromptCatalog prompts,
-            @Value("${app.ai.models.analysis:gemini-3.6-flash}") String analysisModel,
+            @Value("${app.ai.models.analysis:gemini-3.5-flash-lite}") String analysisModel,
             @Value("${app.ai.models.routine:gemini-3.5-flash-lite}") String routineModel,
             @Value("${app.ai.models.coaching:gemini-3.5-flash-lite}") String coachingModel) {
         return new AiClients.LlmClient() {

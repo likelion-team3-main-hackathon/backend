@@ -124,7 +124,7 @@ Fake OCR/LLM은 네트워크 없이 결정적인 분석·루틴·코칭 결과�
 ```dotenv
 AI_PROVIDER=gemini
 GOOGLE_API_KEY=Google_AI_Studio에서_발급한_키
-GEMINI_MODEL_ANALYSIS=gemini-3.6-flash
+GEMINI_MODEL_ANALYSIS=gemini-3.5-flash-lite
 GEMINI_MODEL_ROUTINE=gemini-3.5-flash-lite
 GEMINI_MODEL_COACHING=gemini-3.5-flash-lite
 AI_PROMPT_DOCUMENT_EXTRACTION_VERSION=document-v3-iso-measured-date

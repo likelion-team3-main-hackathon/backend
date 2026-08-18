@@ -236,8 +236,8 @@ public class RecordService {
         Instant from = date.atStartOfDay(ZoneId.of("Asia/Seoul")).toInstant();
         Instant to = from.plus(1, java.time.temporal.ChronoUnit.DAYS);
         return type == null
-                ? records.findByUserIdAndPerformedAtBetweenOrderByPerformedAtDesc(uid, from, to)
-                : records.findByUserIdAndTypeAndPerformedAtBetweenOrderByPerformedAtDesc(
+                ? records.findByUserIdAndPerformedAtBetweenOrderByPerformedAtDescCreatedAtDesc(uid, from, to)
+                : records.findByUserIdAndTypeAndPerformedAtBetweenOrderByPerformedAtDescCreatedAtDesc(
                         uid, type, from, to);
     }
 

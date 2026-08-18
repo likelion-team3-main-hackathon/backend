@@ -174,6 +174,23 @@ public class Routine {
         updatedAt = Instant.now();
     }
 
+    public void markReplaced() {
+        status = Status.PAUSED;
+        updatedAt = Instant.now();
+    }
+
+    public void extendEndDate(LocalDate candidate) {
+        if (candidate != null && candidate.isAfter(endDate)) {
+            endDate = candidate;
+            updatedAt = Instant.now();
+        }
+    }
+
+    public void recomputeType(boolean hasMeal, boolean hasExercise) {
+        type = hasMeal && hasExercise ? Type.MIXED : hasMeal ? Type.MEAL : Type.EXERCISE;
+        updatedAt = Instant.now();
+    }
+
     public enum Type {
         MEAL,
         EXERCISE,

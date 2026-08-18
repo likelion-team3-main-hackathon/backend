@@ -77,4 +77,13 @@ public class ActivityRecord {
         this.status = status;
         createdAt = Instant.now();
     }
+
+    public void reviseMeal(Instant performedAt, String details, String imageKey) {
+        if (type != ActivityType.MEAL || !"COMPLETED".equals(status)) {
+            throw new IllegalStateException("완료된 식단 기록만 수정할 수 있습니다.");
+        }
+        this.performedAt = performedAt;
+        this.details = details;
+        this.imageKey = imageKey;
+    }
 }
