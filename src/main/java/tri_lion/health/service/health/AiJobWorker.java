@@ -91,16 +91,18 @@ public class AiJobWorker {
 
     private void processHealth(AiJobTransactions.JobSnapshot job) throws Exception {
         HealthAiTaskService.PreparedHealthTask task = healthTasks.prepare(job);
-        if (llm.live()) limits.reserveExternalCall(job.userId(), job.type());
-        String extracted = ocr.extract(task.documents());
-        validateExtraction(extracted, task.documentIds());
-        healthTasks.saveExtraction(
-                job.userId(), extracted, ocr.modelVersion(), ocr.promptVersion());
+        if (llm.live() && !task.documents().isEmpty()) limits.reserveExternalCall(job.userId(), job.type());
+        String extracted = task.documents().isEmpty() ? "{\"documents\":[]}" : ocr.extract(task.documents());
+        validateExtraction(extracted, task.ocrDocumentIds());
+        if (!task.documents().isEmpty()) {
+            healthTasks.saveExtraction(
+                    job.userId(), extracted, ocr.modelVersion(), ocr.promptVersion());
+        }
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("documents", json.readTree(maskDirectIdentifiers(extracted)).path("documents"));
         input.put("profile", task.profile());
         if (llm.live()) limits.reserveExternalCall(job.userId(), job.type());
-        String result = llm.healthAnalysis(json.writeValueAsString(input));
+        String result = llm.healthAnalysis(json.writeValueAsString(input), task.visualDocuments());
         String summary = validateHealthAnalysis(result, task.documentIds());
         healthTasks.complete(
                 job,

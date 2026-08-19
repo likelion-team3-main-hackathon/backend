@@ -51,7 +51,9 @@ public class HealthAiTaskService {
         if (ids.isEmpty()) throw new IllegalArgumentException("분석 문서가 없습니다.");
         Analysis analysis = analyses.findById(job.resultId()).orElseThrow();
         analysis.processing();
+        List<Long> ocrDocumentIds = new ArrayList<>();
         List<AiClients.DocumentInput> inputs = new ArrayList<>();
+        List<AiClients.DocumentInput> visualInputs = new ArrayList<>();
         for (Long id : ids) {
             HealthDocument document =
                     documents
@@ -61,15 +63,20 @@ public class HealthAiTaskService {
             if (bytes == null || bytes.length == 0)
                 throw new IllegalArgumentException("분석 문서 원본을 읽을 수 없습니다.");
             document.processing();
-            inputs.add(
+            AiClients.DocumentInput input =
                     new AiClients.DocumentInput(
                             id,
                             document.getType().name(),
                             document.getMeasuredAt(),
                             document.getContentType(),
-                            bytes));
+                            bytes);
+            if (document.getType() == HealthDocument.Type.BODY_PHOTO) visualInputs.add(input);
+            else {
+                ocrDocumentIds.add(id);
+                inputs.add(input);
+            }
         }
-        return new PreparedHealthTask(ids, inputs, profileInput(job.userId()));
+        return new PreparedHealthTask(ids, ocrDocumentIds, inputs, visualInputs, profileInput(job.userId()));
     }
 
     @Transactional
@@ -248,6 +255,8 @@ public class HealthAiTaskService {
 
     public record PreparedHealthTask(
             List<Long> documentIds,
+            List<Long> ocrDocumentIds,
             List<AiClients.DocumentInput> documents,
+            List<AiClients.DocumentInput> visualDocuments,
             Map<String, Object> profile) {}
 }

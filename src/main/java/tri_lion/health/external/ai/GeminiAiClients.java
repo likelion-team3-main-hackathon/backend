@@ -79,11 +79,19 @@ public class GeminiAiClients {
         return new AiClients.LlmClient() {
             @Override
             public String healthAnalysis(String input) {
+                return healthAnalysis(input, List.of());
+            }
+
+            @Override
+            public String healthAnalysis(String input, List<AiClients.DocumentInput> visualDocuments) {
+                String visualInstruction = visualDocuments.isEmpty()
+                        ? ""
+                        : "\n추가로 제공된 전신 사진은 인바디·진료 문서와 동등한 참고 자료입니다. 인바디 수치나 사진 중 하나를 자동으로 우선하지 말고 두 자료의 일치점과 차이를 함께 비교하세요. 사진만으로 질병이나 체지방률을 확정하지 말고, visualBodyAssessment에 체형 분류, 추정 체지방률(범위 또는 null), 신뢰도와 한계를 작성하세요.";
                 return gateway.generate(
                         analysisModel,
-                        prompts.healthAnalysis().content() + "\n입력 JSON:\n" + input,
+                        prompts.healthAnalysis().content() + visualInstruction + "\n입력 JSON:\n" + input,
                         Schemas.HEALTH_ANALYSIS,
-                        List.of());
+                        visualDocuments);
             }
 
             @Override
@@ -282,6 +290,7 @@ public class GeminiAiClients {
                             "bodyCompositionFindings":{"type":"array","items":{"type":"object","properties":{"sourceDocumentId":{"type":"integer"},"label":{"type":"string"},"value":{"type":"number"},"unit":{"type":"string"},"interpretation":{"type":"string"}},"required":["sourceDocumentId","label","value","unit","interpretation"]}},
                             "allergyFindings":{"type":"array","items":{"type":"object","properties":{"sourceDocumentId":{"type":"integer"},"allergen":{"type":"string"},"result":{"type":"string"},"severity":{"type":"string"}},"required":["sourceDocumentId","allergen","result","severity"]}},
                             "medicalFindings":{"type":"array","items":{"type":"object","properties":{"sourceDocumentId":{"type":"integer"},"title":{"type":"string"},"description":{"type":"string"}},"required":["sourceDocumentId","title","description"]}},
+                            "visualBodyAssessment":{"type":"object","properties":{"bodyType":{"type":"string"},"estimatedBodyFatPercent":{"type":["number","null"]},"estimatedBodyFatRange":{"type":["string","null"]},"confidence":{"type":"number"},"summary":{"type":"string"},"limitations":{"type":"array","items":{"type":"string"}}},"required":["bodyType","estimatedBodyFatPercent","estimatedBodyFatRange","confidence","summary","limitations"]},
                             "goals":{"type":"array","items":{"type":"object","properties":{"type":{"type":"string","enum":["WEIGHT_LOSS","REHABILITATION","POSTURE_CORRECTION","MUSCLE_GAIN","GENERAL_WELLNESS"]},"description":{"type":"string"}},"required":["type","description"]}},
                             "precautions":{"type":"array","items":{"type":"string"}},
                             "nutritionConstraints":{"type":"array","items":{"type":"string"}},

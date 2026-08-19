@@ -115,6 +115,7 @@ public class HealthDocument {
         PRESCRIPTION,
         INBODY,
         MCC_RESULT,
+        BODY_PHOTO,
         OTHER
     }
 

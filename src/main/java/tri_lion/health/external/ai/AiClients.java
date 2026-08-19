@@ -21,6 +21,10 @@ public final class AiClients {
     public interface LlmClient {
         String healthAnalysis(String input);
 
+        default String healthAnalysis(String input, List<DocumentInput> visualDocuments) {
+            return healthAnalysis(input);
+        }
+
         String routineGeneration(String input);
 
         CoachingResult coaching(String input);
