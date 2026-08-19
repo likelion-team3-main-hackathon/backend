@@ -45,5 +45,9 @@ public final class RoutineRepositories {
 
         List<ExerciseItem> findByRoutineIdAndScheduledDateAndItemTypeAndDeletedAtIsNull(
                 Long routineId, LocalDate scheduledDate, String itemType);
+
+        List<ExerciseItem>
+                findByRoutineIdAndScheduledDateAndDeletedAtIsNullOrderBySectionOrderAscSortOrderAsc(
+                        Long routineId, LocalDate scheduledDate);
     }
 }

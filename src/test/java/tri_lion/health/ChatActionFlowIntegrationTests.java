@@ -390,7 +390,9 @@ class ChatActionFlowIntegrationTests {
                                                 "title",
                                                 "그릭 요거트와 초코 토핑",
                                                 "content",
-                                                "그릭 요거트, 초코 토핑")),
+                                                """
+                                                {"mealType":"DINNER","foods":[{"name":"그릭 요거트","calories":180,"carbs":15,"protein":18,"fat":6},{"name":"초코 토핑","calories":70,"carbs":8,"protein":1,"fat":4}]}
+                                                """)),
                                 new AiOperation(
                                         "routineService.patchRoutineItem",
                                         Map.of(
@@ -418,10 +420,96 @@ class ChatActionFlowIntegrationTests {
                 .isEqualTo("그릭 요거트와 초코 토핑");
         assertThat(
                         db.queryForObject(
+                                "select content from routine_items where routine_item_id=?",
+                                String.class,
+                                mealItemId))
+                .contains("그릭 요거트")
+                .contains("\"calories\":250.0")
+                .contains("\"carbohydrateGrams\":23.0");
+        assertThat(
+                        db.queryForObject(
                                 "select target_value from routine_items where routine_item_id=?",
                                 BigDecimal.class,
                                 exerciseItemId))
                 .isEqualByComparingTo("15.00");
+    }
+
+    @Test
+    void synchronizesMealContentWhenChatPatchOnlyChangesTitle() {
+        long routineId = createRoutine();
+        long mealItemId =
+                db.queryForObject(
+                        "select routine_item_id from routine_items where personalized_routine_id=? and item_type='MEAL'",
+                        Long.class,
+                        routineId);
+
+        var proposal =
+                actions.prepare(
+                        decision(
+                                "routineService.patchRoutineItem",
+                                Map.of(
+                                        "routineId",
+                                        routineId,
+                                        "routineItemId",
+                                        mealItemId,
+                                        "title",
+                                        "스테이크")));
+        actions.confirm(proposal.getId());
+
+        assertThat(
+                        db.queryForObject(
+                                "select title from routine_items where routine_item_id=?",
+                                String.class,
+                                mealItemId))
+                .isEqualTo("스테이크");
+        assertThat(
+                        db.queryForObject(
+                                "select content from routine_items where routine_item_id=?",
+                                String.class,
+                                mealItemId))
+                .contains("\"name\":\"스테이크\"")
+                .contains("\"calories\":450.0")
+                .contains("\"carbohydrateGrams\":30.0");
+    }
+
+    @Test
+    void synchronizesMealContentWhenBatchChatPatchOnlyChangesTitle() {
+        long routineId = createRoutine();
+        long mealItemId =
+                db.queryForObject(
+                        "select routine_item_id from routine_items where personalized_routine_id=? and item_type='MEAL'",
+                        Long.class,
+                        routineId);
+
+        var proposal =
+                actions.prepare(
+                        decision(
+                                "chatbotExpansion.batchPatchRoutineItems",
+                                Map.of(
+                                        "routineId",
+                                        routineId,
+                                        "items",
+                                        List.of(
+                                                Map.of(
+                                                        "routineItemId",
+                                                        mealItemId,
+                                                        "title",
+                                                        "스테이크")))));
+        actions.confirm(proposal.getId());
+
+        assertThat(
+                        db.queryForObject(
+                                "select title from routine_items where routine_item_id=?",
+                                String.class,
+                                mealItemId))
+                .isEqualTo("스테이크");
+        assertThat(
+                        db.queryForObject(
+                                "select content from routine_items where routine_item_id=?",
+                                String.class,
+                                mealItemId))
+                .contains("\"name\":\"스테이크\"")
+                .contains("\"calories\":450.0");
     }
 
     private long createRoutine() {
@@ -460,7 +548,11 @@ class ChatActionFlowIntegrationTests {
                                                         Map.entry("sectionTitle", "저녁 식단"),
                                                         Map.entry("itemType", "MEAL"),
                                                         Map.entry("title", "닭가슴살 샐러드"),
-                                                        Map.entry("content", "고단백 저녁"),
+                                                        Map.entry(
+                                                                "content",
+                                                                """
+                                                                {"mealType":"DINNER","foods":[{"name":"닭가슴살 샐러드","calories":450,"carbs":30,"protein":45,"fat":12}],"calories":450,"carbohydrateGrams":30,"proteinGrams":45,"fatGrams":12}
+                                                                """),
                                                         Map.entry("scheduledTime", "19:00"),
                                                         Map.entry("targetValue", 450),
                                                         Map.entry("targetUnit", "KCAL"))))));

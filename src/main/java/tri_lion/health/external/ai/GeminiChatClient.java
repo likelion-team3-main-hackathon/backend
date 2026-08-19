@@ -220,10 +220,13 @@ public class GeminiChatClient {
 
                 2. 기존 루틴 항목 변경
                 methodName: routineService.patchRoutineItem
-                - 기존 운동·재활·식단 항목의 제목·내용·목표량·단위·세트·휴식·메모를 바꿀 때 사용하세요.
-                - 반드시 get_routine_items에서 확인한 routineId와 routineItemId를 사용하세요.
-                - 사용자가 말하지 않은 값은 기존값으로 채우지 말고 null로 두세요. 실제로 변경할 필드만 값을 넣으세요.
-                - '15분으로 줄여줘'는 targetValue=15, targetUnit=MINUTES입니다.
+                  - 기존 운동·재활·식단 항목의 제목·내용·목표량·단위·세트·휴식·메모를 바꿀 때 사용하세요.
+                  - 반드시 get_routine_items에서 확인한 routineId와 routineItemId를 사용하세요.
+                  - 사용자가 말하지 않은 값은 기존값으로 채우지 말고 null로 두세요. 실제로 변경할 필드만 값을 넣으세요.
+                  - 단, 식단(MEAL)의 메뉴 이름을 바꿀 때는 title만 보내면 안 됩니다. content도 반드시 함께 바꾸세요.
+                  - 식단 content는 일반 문장이 아니라 JSON 문자열입니다. mealType(BREAKFAST|LUNCH|DINNER|SNACK), foods 배열, calories, carbohydrateGrams, proteinGrams, fatGrams를 모두 넣으세요.
+                  - foods의 각 음식에는 name, calories, carbs, protein, fat를 모두 넣고, 합계 영양소는 foods의 합계와 일치시켜야 합니다.
+                  - '15분으로 줄여줘'는 targetValue=15, targetUnit=MINUTES입니다.
                 - 여러 항목을 바꾸려면 대상 항목마다 operations에 이 메서드를 한 번씩 넣으세요.
                 - 토핑을 번갈아 적용하라는 요청은 조회된 항목 순서대로 요청된 토핑을 순환해 title과 content를 각각 만드세요.
                 arguments:
@@ -342,6 +345,7 @@ public class GeminiChatClient {
                 9. 여러 루틴 항목 일괄 변경·일정 변경·삭제
                 methodName: chatbotExpansion.batchPatchRoutineItems
                 - 아침 식단 전체 변경처럼 제목·내용·목표값을 여러 항목에 한 번에 바꿀 때 사용합니다.
+                - MEAL 항목의 title을 바꾸는 각 items 항목에는 위 형식의 식단 content JSON도 반드시 함께 넣으세요.
                 arguments: {"routineId": 숫자, "items": [{"routineItemId": 숫자, "title": "...", "content": "...", "targetValue": 숫자|null, "targetUnit":"MINUTES|null", "sets": 숫자|null, "restSeconds": 숫자|null, "memo":"...", "intensity":"LOW|MODERATE|HIGH|null"}]}
                 methodName: chatbotExpansion.rescheduleRoutineItems
                 - 못 한 운동을 다른 날짜·시간으로 옮길 때 사용합니다. SKIPPED 항목도 내일로 옮기면 다시 PENDING 상태가 됩니다.

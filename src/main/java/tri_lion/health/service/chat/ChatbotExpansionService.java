@@ -1,6 +1,9 @@
 package tri_lion.health.service.chat;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.*;
@@ -222,6 +225,7 @@ public class ChatbotExpansionService {
         long routineId = positive(args.get("routineId"), "routineId");
         ensureRoutineMutable(userId, routineId);
         List<Long> ids;
+        Map<Long, Map<String, Object>> patchesByItemId = new HashMap<>();
         if ("PATCH".equals(kind)) {
             List<Map<String, Object>> items = mapList(args.get("items"), "items", 1, MAX_BATCH);
             ids = new ArrayList<>();
@@ -239,7 +243,9 @@ public class ChatbotExpansionService {
                                 "memo",
                                 "excludeFromAiAdjustment",
                                 "intensity"));
-                ids.add(positive(item.get("routineItemId"), "routineItemId"));
+                long itemId = positive(item.get("routineItemId"), "routineItemId");
+                ids.add(itemId);
+                patchesByItemId.put(itemId, item);
                 if (item.size() == 1)
                     throw new ApiException(HttpStatus.BAD_REQUEST, "루틴 항목의 변경값이 없습니다.");
                 if (item.containsKey("targetValue"))
@@ -265,7 +271,11 @@ public class ChatbotExpansionService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "루틴 항목 ID가 중복되었습니다.");
         for (Long itemId : ids) {
             if ("RESCHEDULE".equals(kind)) ensureReschedulableItem(userId, routineId, itemId);
-            else ensurePendingItem(userId, routineId, itemId);
+            else {
+                PendingRoutineItem current = ensurePendingItem(userId, routineId, itemId);
+                if ("PATCH".equals(kind))
+                    validateMealPatch(current.itemType(), patchesByItemId.get(itemId));
+            }
         }
     }
 
@@ -275,10 +285,19 @@ public class ChatbotExpansionService {
         List<Map<String, Object>> items = mapList(args.get("items"), "items", 1, MAX_BATCH);
         for (Map<String, Object> item : items) {
             long itemId = positive(item.get("routineItemId"), "routineItemId");
+            PendingRoutineItem current = ensurePendingItem(userId, routineId, itemId);
+            String title = nullableText(item.get("title"));
+            String content = nullableText(item.get("content"));
+            if ("MEAL".equals(current.itemType())) {
+                content =
+                        content != null
+                                ? normalizeMealContent(content)
+                                : renamedMealContent(current, title);
+            }
             db.update(
                     "update routine_items set title=coalesce(?,title), content=coalesce(?,content), target_value=coalesce(?,target_value), target_unit=coalesce(?,target_unit), sets_count=coalesce(?,sets_count), rest_seconds=coalesce(?,rest_seconds), memo=coalesce(?,memo), intensity=coalesce(?,intensity), exclude_from_ai_adjustment=coalesce(?,exclude_from_ai_adjustment), edited_by='USER' where routine_item_id=? and personalized_routine_id=? and deleted_at is null",
-                    nullableText(item.get("title")),
-                    nullableText(item.get("content")),
+                    title,
+                    content,
                     optionalDecimal(item.get("targetValue")),
                     nullableText(item.get("targetUnit")),
                     optionalInteger(item.get("sets")),
@@ -700,15 +719,148 @@ public class ChatbotExpansionService {
             throw ApiException.notFound("일정을 바꿀 수 있는 루틴 항목을 찾을 수 없습니다.");
     }
 
-    private void ensurePendingItem(Long userId, long routineId, long itemId) {
-        Integer count =
-                db.queryForObject(
-                        "select count(*) from routine_items i join personalized_routines r on r.personalized_routine_id=i.personalized_routine_id where i.routine_item_id=? and i.personalized_routine_id=? and r.user_id=? and r.deleted_at is null and i.deleted_at is null and i.status='PENDING'",
-                        Integer.class,
+    private PendingRoutineItem ensurePendingItem(Long userId, long routineId, long itemId) {
+        List<Map<String, Object>> rows =
+                db.queryForList(
+                        "select i.item_type,i.content,i.section_title from routine_items i join personalized_routines r on r.personalized_routine_id=i.personalized_routine_id where i.routine_item_id=? and i.personalized_routine_id=? and r.user_id=? and r.deleted_at is null and i.deleted_at is null and i.status='PENDING'",
                         itemId,
                         routineId,
                         userId);
-        if (count == null || count == 0) throw ApiException.notFound("변경 가능한 루틴 항목을 찾을 수 없습니다.");
+        if (rows.isEmpty()) throw ApiException.notFound("변경 가능한 루틴 항목을 찾을 수 없습니다.");
+        Map<String, Object> row = rows.getFirst();
+        return new PendingRoutineItem(
+                String.valueOf(row.get("item_type")),
+                nullableText(row.get("content")),
+                nullableText(row.get("section_title")));
+    }
+
+    private void validateMealPatch(String itemType, Map<String, Object> item) {
+        if (!"MEAL".equals(itemType)) return;
+        String content = nullableText(item.get("content"));
+        if (content != null) normalizeMealContent(content);
+    }
+
+    private String renamedMealContent(PendingRoutineItem item, String title) {
+        if (title == null) return null;
+        try {
+            JsonNode parsed =
+                    item.content() == null
+                            ? json.createObjectNode()
+                            : json.readTree(item.content());
+            ObjectNode meal =
+                    parsed instanceof ObjectNode existing
+                            ? existing.deepCopy()
+                            : json.createObjectNode();
+            String mealType = supportedMealType(meal.get("mealType"));
+            if (mealType == null) mealType = mealTypeFromSection(item.sectionTitle());
+
+            double calories = numberOrZero(meal, "calories");
+            double carbs = numberOrZero(meal, "carbohydrateGrams", "carbs");
+            double protein = numberOrZero(meal, "proteinGrams", "protein");
+            double fat = numberOrZero(meal, "fatGrams", "fat");
+            if (calories == 0 && carbs == 0 && protein == 0 && fat == 0) {
+                JsonNode foods = meal.get("foods");
+                if (foods != null && foods.isArray()) {
+                    for (JsonNode food : foods) {
+                        calories += numberOrZero(food, "calories");
+                        carbs += numberOrZero(food, "carbs", "carbohydrateGrams");
+                        protein += numberOrZero(food, "protein", "proteinGrams");
+                        fat += numberOrZero(food, "fat", "fatGrams");
+                    }
+                }
+            }
+            meal.put("mealType", mealType);
+            ArrayNode foods = meal.putArray("foods");
+            foods.addObject()
+                    .put("name", title)
+                    .put("calories", calories)
+                    .put("carbs", carbs)
+                    .put("protein", protein)
+                    .put("fat", fat);
+            meal.put("calories", calories);
+            meal.put("carbohydrateGrams", carbs);
+            meal.put("proteinGrams", protein);
+            meal.put("fatGrams", fat);
+            return json.writeValueAsString(meal);
+        } catch (Exception exception) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "기존 식단 내용을 읽어 자동으로 변경하지 못했습니다.");
+        }
+    }
+
+    private String normalizeMealContent(String content) {
+        try {
+            JsonNode parsed = json.readTree(content);
+            if (!(parsed instanceof ObjectNode meal)) throw invalidMealContent();
+            if (supportedMealType(meal.get("mealType")) == null) {
+                throw invalidMealContent();
+            }
+            JsonNode foods = meal.get("foods");
+            if (foods == null || !foods.isArray() || foods.isEmpty()) throw invalidMealContent();
+
+            double calories = 0;
+            double carbs = 0;
+            double protein = 0;
+            double fat = 0;
+            for (JsonNode food : foods) {
+                JsonNode name = food.get("name");
+                if (!food.isObject()
+                        || name == null
+                        || !name.isTextual()
+                        || name.asText().isBlank()) {
+                    throw invalidMealContent();
+                }
+                calories += nonNegativeFoodNumber(food, "calories");
+                carbs += nonNegativeFoodNumber(food, "carbs");
+                protein += nonNegativeFoodNumber(food, "protein");
+                fat += nonNegativeFoodNumber(food, "fat");
+            }
+            meal.put("calories", calories);
+            meal.put("carbohydrateGrams", carbs);
+            meal.put("proteinGrams", protein);
+            meal.put("fatGrams", fat);
+            return json.writeValueAsString(meal);
+        } catch (ApiException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw invalidMealContent();
+        }
+    }
+
+    private double nonNegativeFoodNumber(JsonNode food, String field) {
+        JsonNode value = food.get(field);
+        if (value == null || !value.isNumber() || value.asDouble() < 0) throw invalidMealContent();
+        return value.asDouble();
+    }
+
+    private String supportedMealType(JsonNode value) {
+        if (value == null || !value.isTextual()) return null;
+        return Set.of("BREAKFAST", "LUNCH", "DINNER", "SNACK").contains(value.asText())
+                ? value.asText()
+                : null;
+    }
+
+    private String mealTypeFromSection(String sectionTitle) {
+        if (sectionTitle != null && sectionTitle.contains("아침")) return "BREAKFAST";
+        if (sectionTitle != null && sectionTitle.contains("점심")) return "LUNCH";
+        if (sectionTitle != null && sectionTitle.contains("저녁")) return "DINNER";
+        return "SNACK";
+    }
+
+    private double numberOrZero(JsonNode value, String... fields) {
+        for (String field : fields) {
+            JsonNode number = value.get(field);
+            if (number != null && number.isNumber() && number.asDouble() >= 0)
+                return number.asDouble();
+        }
+        return 0;
+    }
+
+    private record PendingRoutineItem(String itemType, String content, String sectionTitle) {}
+
+    private ApiException invalidMealContent() {
+        return new ApiException(
+                HttpStatus.BAD_REQUEST,
+                "식단 content에는 mealType, foods와 음식별 calories·carbs·protein·fat 값이 필요합니다.");
     }
 
     private void allowOnly(Map<String, Object> values, Set<String> allowed) {

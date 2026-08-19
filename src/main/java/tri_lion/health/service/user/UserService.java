@@ -103,6 +103,7 @@ public class UserService {
                 u.getRole().name(),
                 u.getStatus().name(),
                 u.isOnboardingCompleted(),
+                u.getCreditBalance(),
                 p);
     }
 
@@ -114,5 +115,6 @@ public class UserService {
             String role,
             String status,
             boolean onboardingCompleted,
+            int creditBalance,
             HealthProfile healthProfile) {}
 }
