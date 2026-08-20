@@ -41,7 +41,7 @@ public class AnalysisService {
     @Transactional
     public Analysis create(List<Long> ids, String key) {
         Long uid = auth.sensitive().getId();
-        if (ids == null || ids.isEmpty()) throw new IllegalArgumentException("분석할 문서가 필요합니다.");
+        if (ids == null) throw new IllegalArgumentException("분석 문서 목록이 필요합니다.");
         users.findForUpdateById(uid).orElseThrow();
         for (Long id : ids)
             docs.findByIdAndUserIdAndDeletedAtIsNull(id, uid)

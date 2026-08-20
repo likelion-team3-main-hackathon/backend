@@ -137,5 +137,5 @@ public class HealthController {
                 p.hasNext());
     }
 
-    public record AnalysisRequest(@NotEmpty List<Long> documentIds) {}
+    public record AnalysisRequest(@NotNull List<Long> documentIds) {}
 }

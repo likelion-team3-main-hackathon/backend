@@ -48,7 +48,6 @@ public class HealthAiTaskService {
         List<Long> ids = new ArrayList<>();
         for (var node : json.readTree(job.requestJson()).path("documentIds"))
             ids.add(node.asLong());
-        if (ids.isEmpty()) throw new IllegalArgumentException("분석 문서가 없습니다.");
         Analysis analysis = analyses.findById(job.resultId()).orElseThrow();
         analysis.processing();
         List<Long> ocrDocumentIds = new ArrayList<>();
